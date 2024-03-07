@@ -1,0 +1,3 @@
+
+# Ignore root files to exclude Glauber MC data files, which are large. 
+*.root
