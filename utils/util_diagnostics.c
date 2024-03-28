@@ -4,15 +4,6 @@
 #include "root_draw_tools.h"
 #include "hist_tools.h"
 
-void testDrawTools() {
-  
-}
-
-void testHistTools() {
-  
-  
-}
-
 
 TH2D* trn_A;
 
@@ -20,35 +11,104 @@ double shift_unf = 0.5;
 double shift_nnf = 2;
 double shift_ref = 0.1;
 
+void test_cdf();
+void test_ks();
+void test_translate();
+void test_translate_simple();
+void test_rotate_simple();
+
 void util_diagnostics() {
-  // Testing for more accurate translate macro
-  TFile *fin = new TFile("test.root");
-  TFile *infile_ppReference = new TFile("pp_reference.root");
+  test_ks();
+  return;
+}
+
+// Test for KS test
+void test_ks() {
+  TFile *fin = new TFile("test_data/test.root");
+  TH1D* testhist_unf = fin->Get<TH1D>("test");
+  TH1D* testhist_gaus = fin->Get<TH1D>("test_gaus_2");
+  TH1D* testhist_nnf = fin->Get<TH1D>("nonunif_bins");
+  TH1D* testhist_sml = fin->Get<TH1D>("test_small");
+  TH1D* testhist_ref = fin->Get<TH1D>("test_ref");
+  
+  
+  TFile *infile_ppReference = new TFile("test_data/pp_reference.root");
+  TH1F* sigref_pp = static_cast<TH1F*>(infile_ppReference->Get("Hist1D_y2_1"));
+  
+//  KS_statistic(testhist_sml, translateHist(testhist_sml, -0.1));
+  KS_statistic(testhist_unf, sigref_pp, 0, 5);
+  
+  
+  TH1D* hist1 = new TH1D("test1",";x;y",10, -5, 5);
+  TH1D* hist2 = new TH1D("test2",";x;y",10, -5.5, 4.5);
+  hist1->FillRandom("gaus", 10000);
+  hist2->FillRandom("gaus", 10000);
+//  KS_statistic(hist1, translateHist(hist2, -5));
+//  KS_statistic(hist1, hist2);
+}
+
+// Test for CDF plotting
+void test_cdf() {
+  TFile *fin = new TFile("test_data/test.root");
+  TH1D* testhist_unf = fin->Get<TH1D>("test");
+  TH1D* testhist_nnf = fin->Get<TH1D>("nonunif_bins");
+  
+  TFile *infile_ppReference = new TFile("test_data/pp_reference.root");
+  TH1F* sigref_pp = static_cast<TH1F*>(infile_ppReference->Get("Hist1D_y2_1"));
+  
+  TCanvas *canvas = new TCanvas();
+  canvas->SetWindowSize(1000, 500);
+  canvas->Divide(2, 1);
+  
+  canvas->cd(1);
+  testhist_unf->Draw("hist");
+  
+  canvas->cd(2);
+  drawCDF(testhist_unf, 0, 4.5);
+  
+  canvas->SaveAs("test_plots/CDF_gaus.pdf");
+  
+  canvas->cd(1);
+  gPad->SetLogy();
+  gPad->SetLogx();
+  sigref_pp->Draw("hist");
+  
+  canvas->cd(2);
+  gPad->SetLogx();
+  drawCDF(sigref_pp, 0, 20);
+  
+  canvas->SaveAs("test_plots/CDF_ppReference.pdf");
+}
+
+// Testing for more accurate translate macro
+void test_translate() {
+  TFile *fin = new TFile("test_data/test.root");
+  TFile *infile_ppReference = new TFile("test_data/pp_reference.root");
   TH1D* testhist_unf = static_cast<TH1D*>(fin->Get("test"));
   TH1D* testhist_nnf = static_cast<TH1D*>(fin->Get("nonunif_bins"));
   TH1F* sigref_pp = static_cast<TH1F*>(infile_ppReference->Get("Hist1D_y2_1"));
   
-  TH1D* transhist_unf = static_cast<TH1D*>(translateHist(testhist_unf, 11, shift_unf));
-  TH1D* transhist_nnf = static_cast<TH1D*>(translateHist(testhist_nnf, 11, shift_nnf));
-  TH1F* transhist_ref = static_cast<TH1F*>(translateHist(sigref_pp, 12, shift_ref));
+  TH1D* transhist_unf = static_cast<TH1D*>(translateHist(testhist_unf, shift_unf));
+  TH1D* transhist_nnf = static_cast<TH1D*>(translateHist(testhist_nnf, shift_nnf));
+  TH1F* transhist_ref = static_cast<TH1F*>(translateHist(sigref_pp, shift_ref));
   
   transhist_unf->SetLineColor(kRed);
   transhist_nnf->SetLineColor(kRed);
   transhist_ref->SetLineColor(kRed);
   
-  TH1D* transback_unf = static_cast<TH1D*>(translateHist(transhist_unf, 11, -shift_unf));
-  TH1D* transback_nnf = static_cast<TH1D*>(translateHist(transhist_nnf, 11, -shift_nnf));
-  TH1F* transback_ref = static_cast<TH1F*>(translateHist(transhist_ref, 12, -shift_ref));
+  TH1D* transback_unf = static_cast<TH1D*>(translateHist(transhist_unf, -shift_unf));
+  TH1D* transback_nnf = static_cast<TH1D*>(translateHist(transhist_nnf, -shift_nnf));
+  TH1F* transback_ref = static_cast<TH1F*>(translateHist(transhist_ref, -shift_ref));
   
   transback_unf->SetLineColor(kGray);
   transback_unf->SetLineStyle(8);
-//  transback_unf->SetLineWidth(2);
+  //  transback_unf->SetLineWidth(2);
   transback_nnf->SetLineColor(kGray);
   transback_nnf->SetLineStyle(8);
-//  transback_nnf->SetLineWidth(2);
+  //  transback_nnf->SetLineWidth(2);
   transback_ref->SetLineColor(kGray);
   transback_ref->SetLineStyle(8);
-//  transback_ref->SetLineWidth(2);
+  //  transback_ref->SetLineWidth(2);
   
   gStyle->SetOptStat(0);
   const int nbins[3] = {testhist_unf->GetXaxis()->GetNbins(), testhist_nnf->GetXaxis()->GetNbins(), sigref_pp->GetXaxis()->GetNbins()};
@@ -126,52 +186,62 @@ void util_diagnostics() {
   transback_ref->Draw("hist same");
   leg->Draw();
   
-  c->SaveAs("test_translate.pdf");
+  c->SaveAs("test_plots/test_translate.pdf");
+  return;
+}
+
+// Testing for simple translate macro
+void test_translate_simple() {
+  TFile *fin_glauber = new TFile("test_data/glauber_withgrid_b0.00-1.00.root");
+  TH2D* test_A = static_cast<TH2D*>(fin_glauber->Get("initA_event1"));
+  TH2D* test_B = static_cast<TH2D*>(fin_glauber->Get("initB_event0"));
   
+  TCanvas* c0 = new TCanvas();
+  test_A->Draw("colz");
+  std::vector<double> cm = getCM(test_A, 21, true);
+  TMarker *cm_marker = new TMarker();
+  cm_marker->SetMarkerColor(kRed+2);
+  cm_marker->SetMarkerStyle(5);
+  cm_marker->DrawMarker(cm.at(0), cm.at(1));
+
+  TCanvas* c1 = new TCanvas();
+  TH2D* CM_A = translateHist_simple(test_A);
+  CM_A->Draw("colz");
+  cm = getCM(CM_A, 21, true);
+  cm_marker->DrawMarker(cm.at(0), cm.at(1));
+
+  TCanvas* c2 = new TCanvas();
+  trn_A = translateHist_simple(test_A, 3, -2);
+  trn_A->Draw("colz");
+  cm = getCM(trn_A, 21, true);
+  cm_marker->DrawMarker(cm.at(0), cm.at(1));
+  return;
+}
+
+// Testing for simple rotate macro
+void test_rotate_simple() {
+  TFile *fin_glauber = new TFile("test_data/glauber_withgrid_b0.00-1.00.root");
+  TH2D* test_A = static_cast<TH2D*>(fin_glauber->Get("initA_event1"));
+  TH2D* test_B = static_cast<TH2D*>(fin_glauber->Get("initB_event0"));
   
-//  TFile *fin_glauber = new TFile("glauber_withgrid_b0.00-1.00.root");
-//  TH2D* test_A = static_cast<TH2D*>(fin_glauber->Get("initA_event1"));
-//  TH2D* test_B = static_cast<TH2D*>(fin_glauber->Get("initB_event0"));
-//  
-//  // Testing for simple translate macro
-//  TCanvas* c0 = new TCanvas();
-//  test_A->Draw("colz");
-//  std::vector<double> cm = getCM(test_A, 21, true);
-//  TMarker *cm_marker = new TMarker();
-//  cm_marker->SetMarkerColor(kRed+2);
-//  cm_marker->SetMarkerStyle(5);
-//  cm_marker->DrawMarker(cm.at(0), cm.at(1));
-//  
-//  TCanvas* c1 = new TCanvas();
-//  TH2D* CM_A = translateHist_simple(test_A);
-//  CM_A->Draw("colz");
-//  cm = getCM(CM_A, 21, true);
-//  cm_marker->DrawMarker(cm.at(0), cm.at(1));
-//  
-//  TCanvas* c2 = new TCanvas();
-//  trn_A = translateHist_simple(test_A, 3, -2);
-//  trn_A->Draw("colz");
-//  cm = getCM(trn_A, 21, true);
-//  cm_marker->DrawMarker(cm.at(0), cm.at(1));
+  TCanvas* c0 = new TCanvas();
+  test_A->Draw("colz");
+  std::vector<double> cm = getCM(test_A, 21, true);
+  TMarker *cm_marker = new TMarker();
+  cm_marker->SetMarkerColor(kRed+2);
+  cm_marker->SetMarkerStyle(5);
+  cm_marker->DrawMarker(cm.at(0), cm.at(1));
   
-  //Testing for simple rotate macro
-//  TCanvas* c0 = new TCanvas();
-//  test_A->Draw("colz");
-//  std::vector<double> cm = getCM(test_A, 21, true);
-//  TMarker *cm_marker = new TMarker();
-//  cm_marker->SetMarkerColor(kRed+2);
-//  cm_marker->SetMarkerStyle(5);
-//  cm_marker->DrawMarker(cm.at(0), cm.at(1));
-//  
-//  TCanvas* c1 = new TCanvas();
-//  TH2D* CM_A = rotateHist2D_simple(translateHist_simple(test_A), 1.24);
-//  CM_A->Draw("colz");
-//  cm = getCM(CM_A, 21, true);
-//  cm_marker->DrawMarker(cm.at(0), cm.at(1));
-//  
-//  TCanvas* c2 = new TCanvas();
-//  trn_A = rotateHist2D_simple(translateHist_simple(test_A, 3, -2), 4.81);
-//  trn_A->Draw("colz");
-//  cm = getCM(trn_A, 21, true);
-//  cm_marker->DrawMarker(cm.at(0), cm.at(1));
+  TCanvas* c1 = new TCanvas();
+  TH2D* CM_A = rotateHist2D_simple(translateHist_simple(test_A), 1.24);
+  CM_A->Draw("colz");
+  cm = getCM(CM_A, 21, true);
+  cm_marker->DrawMarker(cm.at(0), cm.at(1));
+  
+  TCanvas* c2 = new TCanvas();
+  trn_A = rotateHist2D_simple(translateHist_simple(test_A, 3, -2), 4.81);
+  trn_A->Draw("colz");
+  cm = getCM(trn_A, 21, true);
+  cm_marker->DrawMarker(cm.at(0), cm.at(1));
+  return;
 }

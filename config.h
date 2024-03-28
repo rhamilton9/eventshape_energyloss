@@ -32,6 +32,15 @@ const int ogrid_resolution = 100;
 
 //------------------------------------------------ Energy Loss Settings
 
+// Algorithm for energy loss extraction
+// Currently implemented methods:
+//    - CHI2        (chi-square fitting with hist rebinning)
+//    - KS-REBIN    (Kalgomorov-Smirnov fitting with rebinning)
+//    - KS          (Kalgomorov-Smirnov fitting without rebinning)
+const char energyloss_extraction_method[10] = "CHI2";
+
+const bool data_errors_sumbyquadrature = false;
+
 // List of centrality bins corresponding to histograms unpacked from HEP data
 // Must be set manually, since this differs between data sets.
 const int centrality_list[15][2] = {
@@ -40,9 +49,10 @@ const int centrality_list[15][2] = {
   { 0, 20}, {20, 40}, {40, 60}, {40, 80}, {60, 80}
 };
 
-const double chi2_minpt_comparison_threshold = 5;   // Lower bound pT for chi2 comparisons, in GeV
-const double dpT_resolution = 0.01;                 // Step size for pT shift in energyloss calculation
-const double max_dpt = 10;                          // Max pT shift to scan, in GeV
+const int index_raa_in_file = 16;                   // The first plot index Hist1D_y1_N with an R_AA plot
+const double minpt_comparison_threshold = 5;        // Lower bound pT for chi2 comparisons, in GeV
+const double dpT_resolution = 0.005;                  // Step size for pT shift in energyloss calculation
+const double max_dpt = 5;                          // Max pT shift to scan, in GeV
 
 //------------------------------------------------ Event Shape Settings
 
