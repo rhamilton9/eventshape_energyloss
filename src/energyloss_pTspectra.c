@@ -56,10 +56,10 @@ void energyloss_pTspectra() {
   // Canvas setup
   TCanvas *canvas = new TCanvas();
 //  canvas->SetCanvasSize(1000, 1000);
-  canvas->SetWindowSize(1000, 1000);
+  canvas->SetWindowSize(1200, 1600);
   
-  TPad* mainpad = buildPad("mainpad", 0.1, 0, 1, 0.9, 0, 0, 0, 0);
-  mainpad->Divide(3,3);
+  TPad* mainpad = buildPad("mainpad", 0.07, 0, 1, 0.9, 0, 0, 0, 0);
+  mainpad->Divide(4,3);
   gStyle->SetOptStat(0);
   
   
@@ -124,15 +124,38 @@ void energyloss_pTspectra() {
       }
       
       //------------------------------------------------------------KS calculation (rebinned)
+
       
-//      double ks_r = KS_statistic(placeholder_hist, data_pt[iCent], 0, minpt_comparison_threshold, true,
-//                                 (ipt < 20 || ipt%20 == 0), Form("cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      double ks_r = KS_statistic(placeholder_ratio, data_raa[iCent], 0, minpt_comparison_threshold, true,
-                                 (ipt < 20 || ipt%20 == 0), Form("cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
+      //new, with pT
+      double ks_r = KS_statistic_new(placeholder_hist, data_pt[iCent], 0, minpt_comparison_threshold, INT_MAX,
+                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
                                                                  centrality_list[iCent][0],centrality_list[iCent][1],
                                                                  centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
+      // new, with raa
+//      double ks_r = KS_statistic_new(placeholder_ratio, data_raa[iCent], 0, minpt_comparison_threshold, INT_MAX,
+//                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
+      //old, with pt, rebin
+//      double ks_r = KS_statistic(placeholder_hist, data_pt[iCent], 0, minpt_comparison_threshold, true,
+//                                 false, Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
+//                                             centrality_list[iCent][0],centrality_list[iCent][1],
+//                                             centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
+      //old, with raa, rebin
+//      double ks_r = KS_statistic(placeholder_ratio, data_raa[iCent], 0, minpt_comparison_threshold, true,
+//                                 false, Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
+      
+//      TH1* hist1,
+//      TH1* hist2,
+//      double horizontal_shift = 0,
+//      double thresh_min = INT_MIN,
+//      double thresh_max = INT_MAX,
+//      bool doPlot = false,
+//      const char *saveName = (char*)"ks",
+//      int iteration = -1
+      
       ks_r_hist->SetBinContent(ipt, ks_r);
       if (ks_r < cmin_ks_r) {
         cmin_ks_r = ks_r;
@@ -143,10 +166,26 @@ void energyloss_pTspectra() {
       
       //------------------------------------------------------------KS calculation (no rebin)
       
-      double ks_n = KS_statistic(data_pt[iCent], pp_reference, -dpt*ipt, minpt_comparison_threshold, true,
-                                 (ipt < 20 || ipt%20 == 0), Form("cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+      //old, with pt, up
+//      double ks_n = KS_statistic(data_pt[iCent], pp_reference, -dpt*ipt, minpt_comparison_threshold-dpt*ipt, true,
+//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
+      //old, with pt, down
+//      double ks_n = KS_statistic(pp_reference, data_pt[iCent], dpt*ipt, minpt_comparison_threshold, true,
+//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+//                                              centrality_list[iCent][0],centrality_list[iCent][1],
+//                                              centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
+      //new, with pt, upshift
+      double ks_n = KS_statistic_new(data_pt[iCent], pp_reference, -dpt*ipt, minpt_comparison_threshold-dpt*ipt, INT_MAX,
+                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
                                                                  centrality_list[iCent][0],centrality_list[iCent][1],
                                                                  centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
+      //new, with pt, downshift
+//      double ks_n = KS_statistic_new(pp_reference, data_pt[iCent], dpt*ipt, minpt_comparison_threshold, INT_MAX,
+//                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
+//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
       ks_n_hist->SetBinContent(ipt, ks_n);
       if (ks_n < cmin_ks_n) {
         cmin_ks_n = ks_n;
@@ -227,6 +266,25 @@ void energyloss_pTspectra() {
     baseLeg_low->Draw();
     
     mainpad->cd(4);
+    // Construct double ratio
+    TAxis* refaxis = pp_reference->GetXaxis();
+    int nbins_doubleratio = refaxis->GetNbins() - refaxis->FindBin(minpt_comparison_threshold+cmin_dpt[0])+1;
+    double binedge_ratio_1[nbins_doubleratio+1];
+    for (int irbin = 0; irbin <= nbins_doubleratio; ++irbin)
+      binedge_ratio_1[irbin] = refaxis->GetBinLowEdge(refaxis->GetNbins() - nbins_doubleratio + irbin + 1);
+    TH1D* doubleratio = new TH1D("",";p_{T};Double Ratio (Data / Shifted)",nbins_doubleratio, binedge_ratio_1);
+    double raa, praa;
+    for (int irbin = 1; irbin <= nbins_doubleratio; ++irbin) {
+      raa =  data_raa[iCent]->GetBinContent(data_raa[iCent]->FindBin(doubleratio->GetBinCenter(irbin)));
+      praa = opt_raa_hist[0]->GetBinContent(opt_raa_hist[0]->FindBin(doubleratio->GetBinCenter(irbin)));
+      std::cout << "bin " << doubleratio->GetBinCenter(irbin) << ", \tRAA = " << raa << ", \tpRAA = " << praa << std::endl;
+      if (raa == 0 || praa == 0) continue;
+      doubleratio->SetBinContent(irbin, raa/praa);
+    }setStyleLine(doubleratio, "violet thin");
+    doubleratio->Draw("hist");
+    drawUnityLine(doubleratio->GetXaxis());
+    
+    mainpad->cd(5);
     gPad->SetLogy();
     pp_reference->Draw("hist");
     datCompPlot[1] = static_cast<TH1F*>(data_pt[iCent]->Clone());
@@ -255,7 +313,7 @@ void energyloss_pTspectra() {
 //    bothCDF_rebin->Add(cdf_rebin);
 //    bothCDF_rebin->Draw("al");
     
-    mainpad->cd(5);
+    mainpad->cd(6);
     if (dpt < 0.05) ks_r_hist->Draw("hist l");
     else            ks_r_hist->Draw("hist");
     optLine->DrawLine(cmin_dpt[1], 0, cmin_dpt[1], ks_r_hist->GetMaximum()*1.05);
@@ -264,7 +322,7 @@ void energyloss_pTspectra() {
     else                         drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[1]), cmin_dpt[1]+0.1,
                                           ks_r_hist->GetMaximum()*0.95, false, kBlack, 0.04, 42, false);
     
-    mainpad->cd(6);
+    mainpad->cd(7);
     data_raa[iCent]->Draw("hist");
     opt_raa_hist[1]->SetLineColor(kRed+2);
     opt_raa_hist[1]->Draw("hist same");
@@ -277,7 +335,24 @@ void energyloss_pTspectra() {
     baseLeg_low->AddEntry(opt_raa_hist[1], Form("Ratio #frac{#bf{pp} Reference}{Fit Result #Deltap_{T} = %.2f}", cmin_dpt[1]), "l");
     baseLeg_low->Draw();
     
-    mainpad->cd(7);
+    mainpad->cd(8);
+    nbins_doubleratio = refaxis->GetNbins() - refaxis->FindBin(minpt_comparison_threshold+cmin_dpt[1])+1;
+    double binedge_ratio_2[nbins_doubleratio+1];
+    for (int irbin = 0; irbin <= nbins_doubleratio; ++irbin)
+      binedge_ratio_2[irbin] = refaxis->GetBinLowEdge(refaxis->GetNbins() - nbins_doubleratio + irbin + 1);
+    doubleratio = new TH1D("",";p_{T};Double Ratio (Data / Shifted)",nbins_doubleratio, binedge_ratio_2);
+    for (int irbin = 1; irbin <= nbins_doubleratio; ++irbin) {
+      raa =  data_raa[iCent]->GetBinContent(data_raa[iCent]->FindBin(doubleratio->GetBinCenter(irbin)));
+      praa = opt_raa_hist[1]->GetBinContent(opt_raa_hist[1]->FindBin(doubleratio->GetBinCenter(irbin)));
+      std::cout << "bin " << doubleratio->GetBinCenter(irbin) << ", \tRAA = " << raa << ", \tpRAA = " << praa << std::endl;
+      if (raa == 0 || praa == 0) continue;
+      doubleratio->SetBinContent(irbin, raa/praa);
+    }setStyleLine(doubleratio, "violet thin");
+    doubleratio->GetYaxis()->SetRangeUser(0, 2.1);
+    doubleratio->Draw("hist");
+    drawUnityLine(doubleratio->GetXaxis());
+    
+    mainpad->cd(9);
     gPad->SetLogy();
     pp_reference->Draw("hist");
     datCompPlot[2] = static_cast<TH1F*>(data_pt[iCent]->Clone());
@@ -306,7 +381,7 @@ void energyloss_pTspectra() {
 //    bothCDF_norebin->Add(cdf_rebin);
 //    bothCDF_norebin->Draw("al");
     
-    mainpad->cd(8);
+    mainpad->cd(10);
     if (dpt < 0.05) ks_n_hist->Draw("hist l");
     else            ks_n_hist->Draw("hist");
     optLine->DrawLine(cmin_dpt[2], 0, cmin_dpt[2], ks_n_hist->GetMaximum()*1.05);
@@ -315,7 +390,7 @@ void energyloss_pTspectra() {
     else                         drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[2]), cmin_dpt[2]+0.1,
                                           ks_n_hist->GetMaximum()*0.95, false, kBlack, 0.04, 42, false);
     
-    mainpad->cd(9);
+    mainpad->cd(11);
     data_raa[iCent]->Draw("hist");
     opt_raa_hist[2]->SetLineColor(kRed+2);
     opt_raa_hist[2]->Draw("hist same");
@@ -327,6 +402,23 @@ void energyloss_pTspectra() {
     baseLeg_low->AddEntry(data_raa[iCent], Form("#bf{%s} R_{AA} Data", species), "l");
     baseLeg_low->AddEntry(opt_raa_hist[2], Form("Ratio #frac{#bf{pp} Reference}{Fit Result #Deltap_{T} = %.2f}", cmin_dpt[2]), "l");
     baseLeg_low->Draw();
+    
+    mainpad->cd(12);
+    nbins_doubleratio = refaxis->GetNbins() - refaxis->FindBin(minpt_comparison_threshold+cmin_dpt[2])+1;
+    double binedge_ratio_3[nbins_doubleratio+1];
+    for (int irbin = 0; irbin <= nbins_doubleratio; ++irbin)
+      binedge_ratio_3[irbin] = refaxis->GetBinLowEdge(refaxis->GetNbins() - nbins_doubleratio + irbin + 1);
+    doubleratio = new TH1D("",";p_{T};Double Ratio (Data / Shifted)",nbins_doubleratio, binedge_ratio_3);
+    for (int irbin = 1; irbin <= nbins_doubleratio; ++irbin) {
+      raa =  data_raa[iCent]->GetBinContent(data_raa[iCent]->FindBin(doubleratio->GetBinCenter(irbin)));
+      praa = opt_raa_hist[2]->GetBinContent(opt_raa_hist[2]->FindBin(doubleratio->GetBinCenter(irbin)));
+      std::cout << "bin " << doubleratio->GetBinCenter(irbin) << ", \tRAA = " << raa << ", \tpRAA = " << praa << std::endl;
+      if (raa == 0 || praa == 0) continue;
+      doubleratio->SetBinContent(irbin, raa/praa);
+    }setStyleLine(doubleratio, "violet thin");
+    doubleratio->GetYaxis()->SetRangeUser(0, 2.1);
+    doubleratio->Draw("hist");
+    drawUnityLine(doubleratio->GetXaxis());
     
     //--------------------------------------------------------------Export canvas, write data to tree
     

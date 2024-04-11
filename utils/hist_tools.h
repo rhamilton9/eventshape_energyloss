@@ -479,7 +479,7 @@ double KS_statistic(TH1* hist1,
                     double comparison_threshold = INT_MIN,
                     bool suppress_CDF_below_threshold = false,
                     bool doPlot = false,
-                    char *saveName = (char*)"ks",
+                    const char *saveName = (char*)"ks",
                     int iteration = -1) {
   TAxis* axis1 = hist1->GetXaxis();
   TAxis* axis2 = hist2->GetXaxis();
@@ -761,7 +761,8 @@ double KS_statistic(TH1* hist1,
     ksgraph_log->Draw("al*");
     thresholdLine->DrawLine(comparison_threshold, 0, comparison_threshold, 1);
     ksLine->DrawLine(axis_ks, 0, axis_ks, 1);
-    c->SaveAs(Form("../tmp/tmpplot/%s.pdf",saveName));
+    c->SaveAs(Form("%s.pdf",saveName));
+//    c->SaveAs(Form("../tmp/tmpplot/%s.pdf",saveName));
     
     delete c;
   }
@@ -781,7 +782,10 @@ std::vector<std::vector<double>> CDF_FromHist_new(TH1* hist, double thresh_min =
     default:
       std::cout<<"Error in <utils/hist_tools::CDF_FromHist>: Input hist type is not TH1F or TH1D."<<std::endl;
       return cdf;
-  } if (thresh_min > thresh_max) {
+  } 
+  
+  // Test for bad thresholds, throw errors if necessary,
+  if (thresh_min > thresh_max) {
     std::cout<<"Warning in <utils/hist_tools::CDF_FromHist>: Axis range is not well defined (min > max)."<<std::endl;
     std::cout<<"Attempting to switch inputs..."<<std::endl;
     double temp = thresh_min;
@@ -797,7 +801,6 @@ std::vector<std::vector<double>> CDF_FromHist_new(TH1* hist, double thresh_min =
   
   // Get bin count and integral for counting and rescaling
   double norm = definiteIntegral(hist, thresh_min, thresh_max);
-  
   if (thresh_min == INT_MIN || thresh_min < axis->GetBinLowEdge(1))      thresh_min = axis->GetBinLowEdge(1);
   if (thresh_max == INT_MAX || thresh_max > axis->GetBinLowEdge(nbin+1)) thresh_max = axis->GetBinLowEdge(nbin+1);
   
@@ -865,34 +868,217 @@ TGraph* drawCDF_new(TH1* hist,
 
 double KS_statistic_new(TH1* hist1,
                         TH1* hist2,
-                        double horizShiftOnHist1 = 0,
-                        double comparison_threshold = INT_MIN,
-                        bool suppress_CDF_below_threshold = false,
+                        double horizontal_shift = 0,
+                        double thresh_min = INT_MIN,
+                        double thresh_max = INT_MAX,
                         bool doPlot = false,
-                        char *saveName = (char*)"ks",
+                        const char *saveName = (char*)"ks",
                         int iteration = -1) {
-  std::vector<std::vector<double>> cdf1 = CDF_FromHist_new(hist1);
-  std::vector<std::vector<double>> cdf2 = CDF_FromHist_new(hist2);
+  // Handle axis shift if specified
+  if (horizontal_shift != 0) {
+    TH1* hist = dynamic_cast<TH1*>(hist1->Clone());
+    const int nbins_axis = hist1->GetXaxis()->GetNbins();
+    double newbins[nbins_axis+1];
+    for (int ibin = 0; ibin <= nbins_axis; ++ibin)
+      newbins[ibin] = hist1->GetXaxis()->GetBinLowEdge(ibin+1) + horizontal_shift;
+    hist->SetBins(nbins_axis, newbins);
+    hist1 = hist;
+  }
+  
+  // Gather CDF data
+  TAxis* axis1 = hist1->GetXaxis();
+  TAxis* axis2 = hist2->GetXaxis();
+  if (thresh_min == INT_MIN) {
+    double temp = axis1->GetBinLowEdge(1);
+    if (temp < axis2->GetBinLowEdge(1)) temp = axis2->GetBinLowEdge(1);
+    thresh_min = temp;
+  } if (thresh_max == INT_MAX) {
+    double temp = axis1->GetBinLowEdge(axis1->GetNbins()+1);
+    if (temp > axis2->GetBinLowEdge(axis2->GetNbins()+1))
+      temp = axis2->GetBinLowEdge(axis2->GetNbins()+1);
+    thresh_max = temp;
+  }
+  std::vector<std::vector<double>> cdf1 = CDF_FromHist_new(hist1, thresh_min, thresh_max);
+  std::vector<std::vector<double>> cdf2 = CDF_FromHist_new(hist2, thresh_min, thresh_max);
   double n1 = cdf1.size();
   double n2 = cdf2.size();
   
-  // Handle comparison_threshold and CDF suppression
+  //Test edge cases
+  if (cdf1.at(0).at(0) > cdf2.at(n2-1).at(0) ||
+      cdf2.at(0).at(0) > cdf1.at(n1-1).at(0)) {
+    std::cout<<"Warning in <utils/hist_tools::KS_statistic>: Input CDFs have disjoint domains. No meaningful comparison can be made."<<std::endl;
+    return 1;
+  }
   
   // Compute KS
   std::vector<std::vector<double>> ks;
+  std::vector<double> opt_ks = {0, 0};
   std::vector<double> cpair_ks(2);
-  int i1 = 0;
-  int i2 = 0;
-  double caxis_1, caxis_2, cval1, cval2;
-  while (i1 < n1 && i2 < n2) {
-    caxis_1 = cdf1.at(i1).at(0);
-    caxis_2 = cdf2.at(i2).at(0);
-  }
+  int i1 = 0; int i2 = 0;
+  std::vector<double> cpair1;
+  std::vector<double> cpair2;
+  std::vector<double> cpairT;
+  while (i1 < n1 || i2 < n2) {
+    if (i1 < n1) cpair1 = cdf1.at(i1);
+    if (i2 < n2) cpair2 = cdf2.at(i2);
+//    std::cout << "loop i1 : " << i1 << ", i2 : " << i2 << std::endl;
+    
+    if (cpair1.at(0) == cpair2.at(0)) {
+//      std::cout << "are equal" << std::endl;
+      // Same value, no need to interpolate
+      cpair_ks.at(0) = cpair1.at(0);
+      cpair_ks.at(1) = TMath::Abs(cpair1.at(1) - cpair2.at(1));
+      ++i1; ++i2;
+    } else if (cpair1.at(0) < cpair2.at(0)) {
+//      std::cout << "1 < 2, reldif = " << cpair1.at(0) - cpair2.at(0) << std::endl;
+      if (i2 == 0) {
+        cpair_ks.at(0) = cpair1.at(0);
+        cpair_ks.at(1) = cpair1.at(1);
+        ++i1;
+      } else if (i1 >= n1) {
+        cpair_ks.at(0) = cpair2.at(0);
+        cpair_ks.at(1) = 1 - cpair2.at(1);
+//        std::cout << "end of cdf 1, looping over cdf2." << std::endl;
+        ++i2;
+      } else { // interpolate on CDF2
+        cpair_ks.at(0) = cpair1.at(0);
+//        if (i2 == 0) std::cout << "FLAG!" << std::endl;
+        cpairT = cdf2.at(i2-1);
+        cpair_ks.at(1) = TMath::Abs( ((cpair2.at(1) - cpairT.at(1)) / (cpair2.at(0) - cpairT.at(0)))
+                                    *(cpair1.at(0) - cpairT.at(0)) + cpairT.at(1) - cpair1.at(1));
+        ++i1;
+//        std::cout << "interp on cdf2 with ks = " << cpair_ks.at(1) << std::endl;
+      }
+    } else if (cpair1.at(0) > cpair2.at(0)) {
+//      std::cout << "1 > 2, reldif = " << cpair1.at(0) - cpair2.at(0) << std::endl;
+      if (i1 == 0) {
+        cpair_ks.at(0) = cpair2.at(0);
+        cpair_ks.at(1) = cpair2.at(1);
+        ++i2;
+      } else if (i2 >= n2) {
+        cpair_ks.at(0) = cpair1.at(0);
+        cpair_ks.at(1) = 1 - cpair1.at(1);
+//        std::cout << "end of cdf 2, looping over cdf1." << std::endl;
+        ++i1;
+      } else { // interpolate on CDF1
+        cpair_ks.at(0) = cpair2.at(0);
+//        if (i1 == 0) std::cout << "FLAG!" << std::endl;
+        cpairT = cdf1.at(i1-1);
+        cpair_ks.at(1) = TMath::Abs( ((cpair1.at(1) - cpairT.at(1)) / (cpair1.at(0) - cpairT.at(0)))
+                                    *(cpair2.at(0) - cpairT.at(0)) + cpairT.at(1) - cpair2.at(1));
+        ++i2;
+//        std::cout << "interp on cdf1 with ks = " << cpair_ks.at(1) << std::endl;
+      }
+    }
+//    std::cout << opt_ks.at(1) << std::endl;
+    
+    // ks push back, compare with opt
+    if (cpair_ks.at(1) > opt_ks.at(1)) opt_ks = cpair_ks;
+    ks.push_back(cpair_ks);
+  } // End of KS loop
   
   // Plot if desired
+  if (doPlot) {
+    TCanvas* c = new TCanvas();
+    c->SetWindowSize(500, 500);
+    c->SetCanvasSize(1000,1000);
+    c->Divide(2, 2);
+    
+    // Maybe worth trying to use gDirectory to catch the canvas/not keep deleting/remaking canvases.
+    
+    c->cd(1);
+    gPad->SetLeftMargin(0.15);
+    gPad->SetRightMargin(0.05);
+    TGraph* cdf1_graph = drawCDF_new(hist1, horizontal_shift, thresh_min, thresh_max, false, true);
+    TGraph* cdf2_graph = drawCDF_new(hist2, 0, thresh_min, thresh_max, false, true);
+    TMultiGraph* both_cdf = new TMultiGraph();
+    both_cdf->SetTitle(Form(";%s;CDF", hist1->GetXaxis()->GetTitle()));
+    setStyleLine(cdf1_graph, "thin red");
+    cdf1_graph->SetMarkerColor(kRed+2);
+    setStyleLine(cdf2_graph, "thin blue");
+    cdf2_graph->SetMarkerColor(kBlue+2);
+    both_cdf->Add(cdf1_graph);
+    both_cdf->Add(cdf2_graph);
+    double nonlog_rangemin = 0; //0.999 for non renorm
+    both_cdf->GetYaxis()->SetRangeUser(nonlog_rangemin, 1);
+    both_cdf->Draw("al*");
+    TLine* thresholdLine = new TLine();
+    setStyleLine(thresholdLine, "gray, dashed");
+    thresholdLine->DrawLine(thresh_min, nonlog_rangemin, thresh_min, 1);
+    thresholdLine->DrawLine(thresh_max, nonlog_rangemin, thresh_max, 1);
+    TLine* ksLine = new TLine();
+    setStyleLine(ksLine, "dotted orange thick");
+    ksLine->DrawLine(opt_ks.at(0), nonlog_rangemin, opt_ks.at(0), 1);
+    
+//    TLegend *leg = new TLegend(0.5, 0.15, 0.94, 0.4);
+//    leg->SetLineWidth(0);
+//    leg->AddEntry(cdf2_graph, "Data p_{T} Spectrum CDF", "lp");
+//    leg->AddEntry(cdf1_graph, "Shifted p_{T} #bf{pp} Reference CDF", "lp");
+//    leg->AddEntry(ksLine, "KS line", "l");
+//    leg->AddEntry(thresholdLine, "p_{T} Comparison Threshold", "l");
+//    leg->Draw();
+    
+    // Make arrays from ks vector for graphing
+    double axisval_array[ks.size()];
+    double ksval_array[ks.size()];
+    for (int iks = 0; iks < ks.size(); ++iks) {
+      axisval_array[iks] = ks.at(iks).at(0);
+      ksval_array[iks] = ks.at(iks).at(1);
+    }
+    
+    c->cd(2);
+    gPad->SetLeftMargin(0.15);
+    gPad->SetRightMargin(0.05);
+    TGraph* ksgraph = new TGraph(ks.size(), axisval_array, ksval_array);
+    ksgraph->SetTitle(Form(";%s;Abs(#Delta_{CDF})", hist1->GetXaxis()->GetTitle()));
+    ksgraph->GetYaxis()->SetRangeUser(0, opt_ks.at(1)*1.2);
+    ksgraph->Draw("al*");
+    thresholdLine->DrawLine(thresh_min, 0, thresh_min, opt_ks.at(1)*1.2);
+    thresholdLine->DrawLine(thresh_max, 0, thresh_max, opt_ks.at(1)*1.2);
+    ksLine->DrawLine(opt_ks.at(0), 0, opt_ks.at(0), opt_ks.at(1)*1.2);
+    drawText(Form("KS = max(#Delta_{CDF}): %.4f", opt_ks.at(1)), 0.9, 0.8, true);
+    drawText(Form("KS found at %s = %.2f", hist1->GetXaxis()->GetTitle(), opt_ks.at(0)), 0.9, 0.75, true);
+    
+    if (iteration >= 0) drawText(Form("#Deltap_{T} KS Fitting Algorithm Iteration %i", iteration), 0.95, 0.93, true);
+    
+    c->cd(3);
+    gPad->SetLeftMargin(0.15);
+    gPad->SetRightMargin(0.05);
+    gPad->SetLogy();
+    TGraph* cdf1_graph_log = drawCDF_new(hist1, horizontal_shift, thresh_min, thresh_max, true, true);
+    TGraph* cdf2_graph_log = drawCDF_new(hist2, 0, thresh_min, thresh_max, true, true);
+    TMultiGraph* both_cdf_log = new TMultiGraph();
+    both_cdf_log->SetTitle(Form(";%s;1-CDF", hist1->GetXaxis()->GetTitle()));
+    setStyleLine(cdf1_graph_log, "thin red");
+    cdf1_graph_log->SetMarkerColor(kRed+2);
+    setStyleLine(cdf2_graph_log, "thin blue");
+    cdf2_graph_log->SetMarkerColor(kBlue+2);
+    both_cdf_log->Add(cdf1_graph_log);
+    both_cdf_log->Add(cdf2_graph_log);
+    both_cdf_log->GetYaxis()->SetRangeUser(1e-11, 1);
+    both_cdf_log->Draw("al*");
+    thresholdLine->DrawLine(thresh_min, 0, thresh_min, 1);
+    thresholdLine->DrawLine(thresh_max, 0, thresh_max, 1);
+    ksLine->DrawLine(opt_ks.at(0), 0, opt_ks.at(0), 1);
+    
+    c->cd(4);
+    gPad->SetLeftMargin(0.15);
+    gPad->SetRightMargin(0.05);
+    gPad->SetLogy();
+    TGraph* ksgraph_log = static_cast<TGraph*>(ksgraph->Clone());
+    ksgraph_log->GetYaxis()->SetRangeUser(1e-11, 1);
+    ksgraph_log->Draw("al*");
+    thresholdLine->DrawLine(thresh_min, 0, thresh_min, 1);
+    thresholdLine->DrawLine(thresh_max, 0, thresh_max, 1);
+    ksLine->DrawLine(opt_ks.at(0), 0, opt_ks.at(0), 1);
+    c->SaveAs(Form("%s.pdf",saveName));
+//    c->SaveAs(Form("../tmp/tmpplot/%s.pdf",saveName));
+    
+    delete c;
+  }
   
   // return ks
-  return 0;
+  return opt_ks.at(1);
 }
 
 //========================================================================== Placeholder Methods

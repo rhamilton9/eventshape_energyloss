@@ -40,6 +40,9 @@ const int ogrid_resolution = 100;
 const char energyloss_extraction_method[10] = "CHI2";
 
 const bool data_errors_sumbyquadrature = false;
+//const bool use_new_ks = false;
+//const bool shift_ref_down = false;
+//const bool use_pt_spectra = false;
 
 // List of centrality bins corresponding to histograms unpacked from HEP data
 // Must be set manually, since this differs between data sets.
@@ -50,7 +53,7 @@ const int centrality_list[15][2] = {
 };
 
 const int index_raa_in_file = 16;                   // The first plot index Hist1D_y1_N with an R_AA plot
-const double minpt_comparison_threshold = 5;        // Lower bound pT for chi2 comparisons, in GeV
+const double minpt_comparison_threshold = 15;        // Lower bound pT for chi2 comparisons, in GeV
 const double dpT_resolution = 0.005;                  // Step size for pT shift in energyloss calculation
 const double max_dpt = 5;                          // Max pT shift to scan, in GeV
 

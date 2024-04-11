@@ -18,7 +18,7 @@ void test_translate_simple();
 void test_rotate_simple();
 
 void util_diagnostics() {
-  test_cdf();
+  test_ks();
   return;
 }
 
@@ -35,8 +35,23 @@ void test_ks() {
   TFile *infile_ppReference = new TFile("test_data/pp_reference.root");
   TH1F* sigref_pp = static_cast<TH1F*>(infile_ppReference->Get("Hist1D_y2_1"));
   
+  TH1* hist_totest_1 = testhist_unf;
+//  TH1* hist_totest_2 = static_cast<TH1D*>(testhist_unf->Clone());
+  TH1* hist_totest_2 = sigref_pp;
+  
 //  KS_statistic(testhist_sml, translateHist(testhist_sml, -0.1));
-  KS_statistic(testhist_unf, sigref_pp, 0, 5);
+  cout << KS_statistic_new(hist_totest_1, hist_totest_2, 2, 0, 7, true, "test_plots/ks_new.pdf") << endl;
+//  cout << KS_statistic(hist_totest_1, hist_totest_2, -4, -4, false, true, "test_plots/ks_old.pdf") << endl;
+  
+//  TH1* hist1,
+//  TH1* hist2,
+//  double horizShiftOnHist1 = 0,
+//  double comparison_threshold = INT_MIN,
+//  bool suppress_CDF_below_threshold = false,
+//  bool doPlot = false,
+//  char *saveName = (char*)"ks",
+//  int iteration = -1
+  
   
   
   TH1D* hist1 = new TH1D("test1",";x;y",10, -5, 5);
@@ -60,8 +75,8 @@ void test_cdf() {
   canvas->SetWindowSize(1000, 500);
   canvas->Divide(2, 1);
   
-  double thresh_min = -3;
-  double thresh_max = 4;
+  double thresh_min = 4;
+  double thresh_max = 4.8;
   
   canvas->cd(1);
   testhist_unf->Draw("hist");

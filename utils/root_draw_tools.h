@@ -84,6 +84,13 @@ void setStyleLine(TAttLine* line, const char* style) {
 
 //========================================================================== Misc. Drawing Tools
 
+// Draw a dashed gray line through unity on the input pad.
+void drawUnityLine(TAxis* reference) {
+  TLine* unityline = new TLine();
+  setStyleLine(unityline, "gray, dashed, thin");
+  unityline->DrawLine(reference->GetXmin(), 1, reference->GetXmax(), 1);
+  return;
+}
 
 // Flip a histogram to its side or upside-down by drawing a TGraph
 // Inputs give
