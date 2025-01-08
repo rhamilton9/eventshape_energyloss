@@ -75,7 +75,9 @@ void setStyleLine(TAttLine* line, const char* style) {
   if (str.Contains("gray")
       || str.Contains("grey")) line->SetLineColor(kGray+1);
   else if (str.Contains("red")) line->SetLineColor(kRed+2);
+  else if (str.Contains("green")) line->SetLineColor(kGreen+2);
   else if (str.Contains("blue")) line->SetLineColor(kBlue+2);
+  else if (str.Contains("yellow")) line->SetLineColor(kYellow+2);
   else if (str.Contains("orange")) line->SetLineColor(kOrange+10);
   else if (str.Contains("green")) line->SetLineColor(kGreen+3);
   else if (str.Contains("sky")) line->SetLineColor(kAzure+5);

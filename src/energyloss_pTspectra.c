@@ -6,6 +6,10 @@
 #include "../utils/root_draw_tools.h"
 #include "../utils/hist_tools.h"
 
+
+
+
+
 void energyloss_pTspectra() {
   const int n_dpt = (int) max_dpt / dpT_resolution;
   const int n_raa = sizeof(centrality_list) / sizeof(int[2]);
@@ -14,31 +18,83 @@ void energyloss_pTspectra() {
   snprintf(species, 5, "%s%s", speciesA, speciesB);
   const char string_truefalse[2][10] = {"true","false"};
   
-  TFile *infile_raa = new TFile(Form("../data.nosync/%s_%.2fTeV/spectra/%s_%s%.2fTeV_unpacked.root",
-                                species, sqrt_s, experiment, species, sqrt_s));
-  TFile *infile_ref = new TFile(Form("../data.nosync/pp_reference_%.2fTeV.root", sqrt_s));
+  TFile* infile_raa = new TFile(Form("../data.nosync/%s_%.2fTeV/spectra/%s_%s%.2fTeV_unpacked_%i.root",
+                                species, sqrt_s, experiment, species, sqrt_s, dataset));
+  TFile* infile_ref = new TFile(Form("../data.nosync/pp_reference_%i.root", dataset));
   
-  TH1F *pp_reference = infile_ref->Get<TH1F>("Hist1D_y2_1");
-  pp_reference->SetLineColor(kBlack);
-  pp_reference->SetTitle(";p_{T} [GeV];1/2#pip_{T} d^{2}#sigma/d#etadp_{T} [mb/GeV^{2}]");
+  // Set up data according to inputs
+  
+  // 2018 dataset.
+  //    - 2.76 TeV: 1, 7
+  //    - 5.02 TeV: 2, 8
+  int pt_table;
+  int raa_table;
+  // For 2013 reference:
+  //    - Hist1D_y2_1 is 2.76 TeV
+  // For 2018 reference:
+  //    - Hist1D_y1_4 is 5.02 TeV
+  //    - Hist1D_y2_4 is 2.76 TeV
+  TH1F *pp_reference;
+  if (dataset == 2013) {
+    pp_reference = infile_ref->Get<TH1F>("Hist1D_y2_1");
+    pp_reference->SetTitle(";p_{T} [GeV];1/2#pip_{T} d^{2}#sigma/d#etadp_{T} [mb/GeV^{2}]");
+    std::cout << "debug" << std::endl;
+  } else if (dataset == 2018) {
+    if (sqrt_s == 2.76) {
+      pp_reference = infile_ref->Get<TH1F>("Hist1D_y2_4");
+      pt_table = 1;
+      raa_table = 7;
+    } else if (sqrt_s == 5.02) {
+      pp_reference = infile_ref->Get<TH1F>("Hist1D_y1_4");
+      pt_table = 2;
+      raa_table = 8;
+    } else {
+      std::cout << "Error in <src/energyloss_pTspectra>: Requested CM energy sqrt_s = " <<
+        sqrt_s << " is not available in 2018 dataset." << std::endl;
+      return;
+    }pp_reference->SetTitle(";p_{T} [GeV];1/N^{evt} d^{2}N/D#eta/dp_{T} [C/GeV]");
+  } else {
+    std::cout<<Form("Error in <src/energyloss_pTspectra>: No data available for %i.",dataset)<<std::endl;
+    return;
+  }pp_reference->SetLineColor(kBlack);
+  
+  
+  
+  
   TH1F* data_pt[n_raa];
   TH1F* data_raa[n_raa];
   TH1F* data_totalunc[n_raa];
   for (int i = 0; i < n_raa; ++i) {
-    data_pt[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_%i",i+1)));
-    data_raa[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_%i",i+index_raa_in_file)));
+    if (dataset == 2013) {
+      data_pt[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_%i",i+1)));
+      data_raa[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_%i",i+index_raa_in_file)));
+    } else if (dataset == 2018) {
+      data_pt[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_%i",i+1, pt_table)));
+      data_raa[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_%i",i+1, raa_table)));
+    }
+
+    
     data_raa[i]->SetTitle(";p_{T} [GeV];R_{AA}");
     
     if (data_errors_sumbyquadrature) {
       //loop, compute by quadrature
     } else {
-      data_totalunc[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e1_%i",i+index_raa_in_file)));
-      data_totalunc[i]->Add(data_totalunc[i],
-                            static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e2_%i",i+index_raa_in_file))));
-      data_totalunc[i]->Add(data_totalunc[i],
-                            static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e3_%i",i+index_raa_in_file))));
+      if (dataset == 2013) {
+        data_totalunc[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e1_%i",i+index_raa_in_file)));
+        data_totalunc[i]->Add(data_totalunc[i],
+                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e2_%i",i+index_raa_in_file))));
+        data_totalunc[i]->Add(data_totalunc[i],
+                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e3_%i",i+index_raa_in_file))));
+      } else if (dataset == 2018) {
+        data_totalunc[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_e1_%i",i+1, raa_table)));
+        data_totalunc[i]->Add(data_totalunc[i],
+                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_e2_%i",i+1, raa_table))));
+        data_totalunc[i]->Add(data_totalunc[i],
+                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_e3_%i",i+1, raa_table))));
+      }
     }
   }
+  
   
   
   // Open output file or create it if it doesn't exist.
@@ -128,7 +184,7 @@ void energyloss_pTspectra() {
       
       //new, with pT
       double ks_r = KS_statistic_new(placeholder_hist, data_pt[iCent], 0, minpt_comparison_threshold, INT_MAX,
-                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
+                                     false, Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
                                                                  centrality_list[iCent][0],centrality_list[iCent][1],
                                                                  centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
       // new, with raa
@@ -168,22 +224,22 @@ void energyloss_pTspectra() {
       
       //old, with pt, up
 //      double ks_n = KS_statistic(data_pt[iCent], pp_reference, -dpt*ipt, minpt_comparison_threshold-dpt*ipt, true,
-//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
 //                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
 //                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
       //old, with pt, down
 //      double ks_n = KS_statistic(pp_reference, data_pt[iCent], dpt*ipt, minpt_comparison_threshold, true,
-//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
 //                                              centrality_list[iCent][0],centrality_list[iCent][1],
 //                                              centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
       //new, with pt, upshift
       double ks_n = KS_statistic_new(data_pt[iCent], pp_reference, -dpt*ipt, minpt_comparison_threshold-dpt*ipt, INT_MAX,
-                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+                                     false, Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
                                                                  centrality_list[iCent][0],centrality_list[iCent][1],
                                                                  centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
       //new, with pt, downshift
 //      double ks_n = KS_statistic_new(pp_reference, data_pt[iCent], dpt*ipt, minpt_comparison_threshold, INT_MAX,
-//                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_r_Cent%i-%i%%_i%i",
+//                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
 //                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
 //                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
       ks_n_hist->SetBinContent(ipt, ks_n);
@@ -251,9 +307,10 @@ void energyloss_pTspectra() {
     
     mainpad->cd(3);
     //  gPad->SetLogx();
-    //  gPad->SetLogy();
+      gPad->SetLogy();
     data_raa[iCent]->SetLineColor(kBlack);
     data_raa[iCent]->Draw("hist");
+    data_raa[iCent]->GetYaxis()->SetRangeUser(0.05, 1);
     opt_raa_hist[0]->SetLineColor(kRed+2);
     opt_raa_hist[0]->Draw("hist same");
     thresholdLine->DrawLine(minpt_comparison_threshold, data_raa[iCent]->GetMinimum(),
@@ -323,6 +380,7 @@ void energyloss_pTspectra() {
                                           ks_r_hist->GetMaximum()*0.95, false, kBlack, 0.04, 42, false);
     
     mainpad->cd(7);
+    gPad->SetLogy();
     data_raa[iCent]->Draw("hist");
     opt_raa_hist[1]->SetLineColor(kRed+2);
     opt_raa_hist[1]->Draw("hist same");
@@ -391,6 +449,7 @@ void energyloss_pTspectra() {
                                           ks_n_hist->GetMaximum()*0.95, false, kBlack, 0.04, 42, false);
     
     mainpad->cd(11);
+    gPad->SetLogy();
     data_raa[iCent]->Draw("hist");
     opt_raa_hist[2]->SetLineColor(kRed+2);
     opt_raa_hist[2]->Draw("hist same");

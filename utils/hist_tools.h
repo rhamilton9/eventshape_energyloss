@@ -3,6 +3,8 @@
 
 // Variables for storing data that may be of interest in the daughter macro
 
+#include "interpolation_tools.h"
+
 double lostdata_translate;
 double lostdata_rotate;
 
@@ -346,432 +348,28 @@ TH2D* rotateHist2D(TH1* hist, double angle) {
   return new TH2D();
 }
 
-// Returns gradient-norm map of input 2D histogram.
-// Gradient is computed using finite difference approximation.
-//
-// CONSIDERATIONS :: Could be implemented more elegantly, or include
-//    higher order corrections to finite difference upon request.
-TH2D* gradientNorm(TH2D* hist) {
-  TH2D* out_hist = (TH2D*) hist->Clone();
-  out_hist->Reset();
-  
-  const int nbins_x = hist->GetXaxis()->GetNbins();
-  const int nbins_y = hist->GetYaxis()->GetNbins();
-  
-  double ux, uy;
-  double cx, cy;
-  double lx, ly;
-  double hx, hy;
-  double dx, dy;
-  for (int ix = 1; ix <= nbins_x; ++ix) {
-    if (ix == 1) {
-      lx = ix;
-      ux = ix + 1;
-      cx = ix;
-      hx = hist->GetXaxis()->GetBinWidth(ix);
-    } else if (ix == nbins_x) {
-      lx = ix-1;
-      cx = ix;
-      ux = ix;
-      hx = hist->GetXaxis()->GetBinWidth(ix);
-    } else {
-      lx = ix - 1;
-      cx = ix;
-      ux = ix + 1;
-      hx = hist->GetXaxis()->GetBinWidth(ix-1)
-            +hist->GetXaxis()->GetBinWidth(ix);
-    }
-    
-    for (int iy = 1; iy <= nbins_y; ++iy) {
-      if (iy == 1) {
-        ly = iy;
-        uy = iy + 1;
-        cy = iy;
-        hy = hist->GetYaxis()->GetBinWidth(iy);
-      } else if (iy == nbins_y) {
-        ly = iy-1;
-        cy = iy;
-        uy = iy;
-        hy = hist->GetYaxis()->GetBinWidth(iy);
-      } else {
-        ly = iy - 1;
-        cy = iy;
-        uy = iy + 1;
-        hy = hist->GetYaxis()->GetBinWidth(iy-1)
-              +hist->GetYaxis()->GetBinWidth(iy);
-      }
-      
-      // compute norm gradient with finite difference
-      out_hist->Fill(hist->GetXaxis()->GetBinCenter(ix),
-                     hist->GetXaxis()->GetBinCenter(iy),
-                     TMath::Sqrt(TMath::Power((hist->GetBinContent(ux, cy) - hist->GetBinContent(lx, cy)) / hx, 2) +
-                                 TMath::Power((hist->GetBinContent(cx, uy) - hist->GetBinContent(cx, ly)) / hy, 2)));
-    }
-  }return out_hist;
-}
+
 
 //========================================================================== Statistical Tools
 
-// Computes the Empirical Cumulative Distribution Function for a 1D hist.
-// -----------------------*IMPORTANT*-----------------------
-// Assumes the probability distribution within a single bin is uniform.
-// ---------------------------------------------------------
-// Input must be either TH1D or TH1F type; other types will throw an error.
-// The eCDF is stored as a vector that can be used for other analysis.
-std::vector<double> CDF_FromHist(TH1* hist) {
-  // Verify that input hist is of compatible type
-  int histflag = getHistType(hist);
-  std::vector<double> cdf;
-  switch (histflag) {
-    case 11: case 12: break;
-    default:
-      std::cout<<"Error in CDF_FromHist :: Input hist type is not TH1F or TH1D."<<std::endl;
-      return cdf;
-  }
-  
-  // Take integral for later rescaling
-  double norm = hist->Integral("width");
-  
-  // Extract CDF assuming locally uniform prior
-  int nbin = hist->GetXaxis()->GetNbins();
-  cdf.push_back(0);
-  for (int ibin = 1; ibin <= nbin; ++ibin) {
-    cdf.push_back(cdf.at(ibin - 1) + (hist->GetBinContent(ibin) * hist->GetXaxis()->GetBinWidth(ibin))/norm);
-  }cdf.push_back(1);
-  return cdf;
-}
-
-// Draws and returns a graphical representation of the CDF
-// Result is drawn on the current gPad unless suppressed.
-TGraph* drawCDF(TH1* hist,
-                double horiz_shift = 0,
-                bool drawLogy = false,
-                bool suppressDraw = false) {
-  std::vector<double> cdf = CDF_FromHist(hist);
-  int nbin = hist->GetXaxis()->GetNbins();
-  
-  // Establish bin threshold + test for edge cases
-  double bin_axis[nbin+1];
-  double cdf_axis[nbin+1];
-  
-  // Loop over CDF and assign axis vals to CDF
-  for (int ibin = 0; ibin <= nbin; ++ibin) {
-    bin_axis[ibin] = hist->GetXaxis()->GetBinLowEdge(ibin+1) + horiz_shift;
-    if (drawLogy) cdf_axis[ibin] = 1-cdf.at(ibin);
-    else          cdf_axis[ibin] = cdf.at(ibin);
-  }
-  
-  // Construct TGraph and plot if specified
-  TGraph* cdf_graph = new TGraph(nbin+1, bin_axis, cdf_axis);
-  cdf_graph->SetTitle(Form(";%s;eCDF",hist->GetXaxis()->GetTitle()));
-  if (!suppressDraw) cdf_graph->Draw("al");
-  return cdf_graph;
-}
-
-// Computes the Kalgomorov-Smirnov (KS) statistic for 2 histograms
-//
-// The variable horizShiftOnHist1 allows for the CDF of hist1 to be
-// shifted horizontally by some amount before computing the KS.
-// Only horizontal axis values above comparison_threshold are considered.
-double KS_statistic(TH1* hist1,
-                    TH1* hist2,
-                    double horizShiftOnHist1 = 0,
-                    double comparison_threshold = INT_MIN,
-                    bool suppress_CDF_below_threshold = false,
-                    bool doPlot = false,
-                    const char *saveName = (char*)"ks",
-                    int iteration = -1) {
-  TAxis* axis1 = hist1->GetXaxis();
-  TAxis* axis2 = hist2->GetXaxis();
-  int nbin_1 = axis1->GetNbins();
-  int nbin_2 = axis2->GetNbins();
-  if (horizShiftOnHist1 != 0) {
-    //Make new axis.
-    double bins[nbin_1 + 1];
-    for (int i = 0; i <= nbin_1; ++i)
-      bins[i] = axis1->GetBinLowEdge(i+1) + horizShiftOnHist1;
-    axis1 = new TAxis(nbin_1, bins);
-  }
-  
-  // If requested, renormalize the computed CDF and recalculate KS above the threshold
-  // To do this, create a new histogram with only bin information above the threshold.
-  if (suppress_CDF_below_threshold) {
-    int startbin_1 = axis1->FindBin(comparison_threshold);
-    int startbin_2 = axis2->FindBin(comparison_threshold);
-    std::vector<double> binedge1_vector;
-    std::vector<double> binedge2_vector;
-    binedge1_vector.push_back(comparison_threshold);
-    binedge2_vector.push_back(comparison_threshold);
-    
-    for (int ibin = startbin_1; ibin <= nbin_1; ++ibin) {
-      if (axis1->GetBinLowEdge(ibin+1) > axis2->GetBinLowEdge(nbin_2+1)) {
-//        binedge1_vector.push_back(axis2->GetBinLowEdge(nbin_2+1));
-        break;
-      }binedge1_vector.push_back(axis1->GetBinLowEdge(ibin+1));
-    }for (int ibin = startbin_2; ibin <= nbin_2; ++ibin) {
-      if (axis2->GetBinLowEdge(ibin+1) > axis1->GetBinLowEdge(nbin_1+1)) {
-//        binedge2_vector.push_back(axis1->GetBinLowEdge(nbin_1+1));
-        break;
-      }binedge2_vector.push_back(axis2->GetBinLowEdge(ibin+1));
-    }
-    
-    double binedge1_array[binedge1_vector.size()];
-    double binedge2_array[binedge2_vector.size()];
-    for (int i = 0; i < binedge1_vector.size(); ++i)
-      binedge1_array[i] = binedge1_vector.at(i);
-    for (int i = 0; i < binedge2_vector.size(); ++i)
-      binedge2_array[i] = binedge2_vector.at(i);
-    
-//    for (int i = 0; i < binedge2_vector.size(); ++i) cout << binedge2_array[i] << endl;
-    
-    TH1D* temphist1 = new TH1D("", hist1->GetTitle(), binedge1_vector.size()-1, binedge1_array);
-    TH1D* temphist2 = new TH1D("", hist2->GetTitle(), binedge2_vector.size()-1, binedge2_array);
-    
-    for (int i = 1; i <= binedge1_vector.size()-1; ++i)
-      temphist1->SetBinContent(i, hist1->GetBinContent(i+startbin_1-1));
-    for (int i = 1; i <= binedge1_vector.size()-2; ++i)
-      temphist2->SetBinContent(i, hist2->GetBinContent(i+startbin_2-1));
-    
-    hist1 = temphist1;
-    hist2 = temphist2;
-    axis1 = hist1->GetXaxis();
-    axis2 = hist2->GetXaxis();
-    nbin_1 = axis1->GetNbins();
-    nbin_2 = axis2->GetNbins();
-  }
-  
-  
-  
-  std::vector<double> cdf1 = CDF_FromHist(hist1);
-  std::vector<double> cdf2 = CDF_FromHist(hist2);
-  cdf1.push_back(1); cdf2.push_back(1);
-  
-  //debug
-//  std::cout << "CDF1 ::" << std::endl;
-//  for (double d:cdf1) std::cout<<d<<endl;
-//  std::cout << "CDF2 ::" << std::endl;
-//  for (double d:cdf2) std::cout<<d<<endl;
-//  std::cout << "end CDF" << std::endl;
-  
-  int start_bin1 = axis1->FindBin(comparison_threshold);
-  int start_bin2 = axis2->FindBin(comparison_threshold);
-  int i1 = 0;
-  int i2 = 0;
-  double ks = 0;
-  double axis_ks;
-  double ks_local, interp;
-  std::vector<double> ksvals;
-  std::vector<double> axisvals;
-  bool checkCompFlag = false;
-  double cdf_at_threshold[2] = {0, 0};
-  if ((comparison_threshold < axis1->GetBinLowEdge(1) &&
-       comparison_threshold < axis2->GetBinLowEdge(1) ) ||
-      (comparison_threshold > axis1->GetBinLowEdge(nbin_1 + 1) &&
-       comparison_threshold > axis2->GetBinLowEdge(nbin_2 + 1) )) checkCompFlag = true;
-  do {
-//    cout << i1 << ": " << axis1->GetBinLowEdge(i1+1) << " " << i2 << ": " << axis2->GetBinLowEdge(i2+1) << endl;
-    // Check if the comparison threshold is between the current values
-    if (!checkCompFlag &&
-        axis1->GetBinLowEdge(i1+1) > comparison_threshold &&
-        axis2->GetBinLowEdge(i2+1) > comparison_threshold &&
-        axis1->GetBinLowEdge(i1) < comparison_threshold &&
-        axis2->GetBinLowEdge(i2) < comparison_threshold) {
-      cdf_at_threshold[0] = ( ((cdf1.at(i1) - cdf1.at(i1-1)) /
-                               (axis1->GetBinLowEdge(i1+1) - axis1->GetBinLowEdge(i1)))
-                             *(comparison_threshold - axis1->GetBinLowEdge(i1)) + cdf1.at(i1-1) );
-      cdf_at_threshold[1] = ( ((cdf2.at(i2) - cdf2.at(i2-1)) /
-                               (axis2->GetBinLowEdge(i2+1) - axis2->GetBinLowEdge(i2)))
-                             *(comparison_threshold - axis2->GetBinLowEdge(i2)) + cdf2.at(i2-1) );
-      ks_local = TMath::Abs(cdf_at_threshold[1] - cdf_at_threshold[0]);
-      axisvals.push_back(comparison_threshold);
-      checkCompFlag = true;
-//      cout << "added comp with ks = " << ks_local << std::endl;
-    } else if (TMath::Abs(axis1->GetBinLowEdge(i1+1) - axis2->GetBinLowEdge(i2+1)) < 1e-10) {
-      // Begin regular cases
-      
-      // Both have same edge; no need to interpolate
-      ks_local = TMath::Abs(cdf1.at(i1) - cdf2.at(i2));
-      axisvals.push_back(axis1->GetBinLowEdge(i1+1));
-//      std::cout << "same!" << std::endl;
-//      if (i1 < nbin_1) ++i1;
-//      if (i2 < nbin_2) ++i2;
-      ++i1;
-      ++i2;
-    } else if (axis1->GetBinLowEdge(i1+1) < axis2->GetBinLowEdge(i2+1)) {
-      // Compute at current hist1 bin edge
-      if (i2 == 0) { // Test edge cases (no overlap)
-        ks_local = cdf1.at(i1);
-        axisvals.push_back(axis1->GetBinLowEdge(i1+1));
-        ++i1;
-      } else if (i1 > nbin_1) { // not actually using hist1, hist1 is out of entries.
-        ks_local = 1 - cdf2.at(i2);
-        axisvals.push_back(axis2->GetBinLowEdge(i2+1));
-        ++i2;
-      } else {
-        // Interpolate on CDF2 to match val at CDF1 (this is where uniform assumption appears)
-        interp = ( ((cdf2.at(i2) - cdf2.at(i2-1)) /
-                     (axis2->GetBinLowEdge(i2+1) - axis2->GetBinLowEdge(i2)))
-                  *(axis1->GetBinLowEdge(i1+1) - axis2->GetBinLowEdge(i2)) + cdf2.at(i2-1) );
-        ks_local = TMath::Abs(interp - cdf1.at(i1));
-        axisvals.push_back(axis1->GetBinLowEdge(i1+1));
-        ++i1;
-      }
-    } else { 
-      // Compute at current hist2 bin edge
-      if (i1 == 0) { // Test edge cases (no overlap)
-        ks_local = cdf2.at(i2);
-        axisvals.push_back(axis2->GetBinLowEdge(i2+1));
-        ++i2;
-      } else if (i2 > nbin_2) { // not actually using hist2, hist2 is out of entries.
-        ks_local = 1 - cdf1.at(i1);
-        axisvals.push_back(axis1->GetBinLowEdge(i1+1));
-        ++i1;
-      } else {
-        // Interpolate on CDF1 to match val at CDF2 (this is where uniform assumption appears)
-        interp = ( ((cdf1.at(i1) - cdf1.at(i1-1)) /
-                    (axis1->GetBinLowEdge(i1+1) - axis1->GetBinLowEdge(i1)))
-                  *(axis2->GetBinLowEdge(i2+1) - axis1->GetBinLowEdge(i1)) + cdf1.at(i1-1) );
-        ks_local = TMath::Abs(interp - cdf2.at(i2));
-        axisvals.push_back(axis2->GetBinLowEdge(i2+1));
-        ++i2;
-      }
-    }ksvals.push_back(ks_local);
-    
-    //debug
-//    std::cout<< Form("%.2f,\t\tks: ",axisvals.back()) << ks_local << std::endl;
-//    std::cout << Form("axis1: %.2f, axis2: %.2f", axis1->GetBinLowEdge(i1+1), axis2->GetBinLowEdge(i2+1)) << std::endl;
-    
-    if (axisvals.back() < comparison_threshold) continue;
-    
-    if (ks_local > ks) {
-      ks = ks_local;
-      axis_ks = axisvals.back();
-    }
-  } while (i1 + i2 <= nbin_1 + nbin_2);
-  
-//  std::cout << "max ks " << ks << std::endl;
-  
-  ksvals.push_back(0);
-  if (axis2->GetBinLowEdge(nbin_2+1) > axis1->GetBinLowEdge(nbin_1+1))
-    axisvals.push_back(axis2->GetBinLowEdge(nbin_2+1));
-  else
-    axisvals.push_back(axis1->GetBinLowEdge(nbin_1+1));
-  
-  //debug
-//  cout << ksvals.size() << endl;
-//  cout << axisvals.size() << endl;
-  
-  // Make plot to check macro is working
-  // mainly for debugging purposes, macro would work without it.
-  double axisval_array[axisvals.size()];
-  for (int i = 0; i < axisvals.size(); ++i) {
-    axisval_array[i] = axisvals.at(i);
-  }
-  double ksval_array[ksvals.size()];
-  for (int i = 0; i < ksvals.size(); ++i) {
-    ksval_array[i] = ksvals.at(i);
-  }
-  
-  if (doPlot) {
-    TCanvas* c = new TCanvas();
-    c->SetWindowSize(500, 500);
-    c->SetCanvasSize(1000,1000);
-    c->Divide(2, 2);
-    
-    // Maybe worth trying to use gDirectory to catch the canvas/not keep deleting/remaking canvases.
-    
-    c->cd(1);
-    gPad->SetLeftMargin(0.15);
-    gPad->SetRightMargin(0.05);
-    TGraph* cdf1_graph = drawCDF(hist1, horizShiftOnHist1, false, true);
-    TGraph* cdf2_graph = drawCDF(hist2, 0, false, true);
-    TMultiGraph* both_cdf = new TMultiGraph();
-    both_cdf->SetTitle(Form(";%s;CDF", hist1->GetXaxis()->GetTitle()));
-    cdf1_graph->SetLineColor(kRed+2);
-    cdf1_graph->SetMarkerColor(kRed+2);
-    cdf1_graph->SetMarkerStyle(24);
-    cdf2_graph->SetLineColor(kBlue+2);
-    cdf2_graph->SetMarkerColor(kBlue+2);
-    cdf2_graph->SetMarkerStyle(25);
-    both_cdf->Add(cdf1_graph);
-    both_cdf->Add(cdf2_graph);
-    double nonlog_rangemin = 0; //0.999 for non renorm
-    both_cdf->GetYaxis()->SetRangeUser(nonlog_rangemin, 1);
-    both_cdf->Draw("al*");
-    TLine* thresholdLine = new TLine();
-//    thresholdLine->SetLineColor(kGray+1);
-//    thresholdLine->SetLineWidth(2);
-    TLine* ksLine = new TLine();
-    ksLine->SetLineColor(kOrange+10);
-    ksLine->SetLineWidth(2);
-    ksLine->SetLineStyle(3);
-    thresholdLine->DrawLine(comparison_threshold, nonlog_rangemin, comparison_threshold, 1);
-    ksLine->DrawLine(axis_ks, nonlog_rangemin, axis_ks, 1);
-    
-    TLegend *leg = new TLegend(0.5, 0.15, 0.94, 0.4);
-    leg->SetLineWidth(0);
-    leg->AddEntry(cdf2_graph, "Data p_{T} Spectrum CDF", "lp");
-    leg->AddEntry(cdf1_graph, "Shifted p_{T} #bf{pp} Reference CDF", "lp");
-    leg->AddEntry(ksLine, "KS line", "l");
-    leg->AddEntry(thresholdLine, "p_{T} Comparison Threshold", "l");
-    leg->Draw();
-    
-    
-    c->cd(2);
-    gPad->SetLeftMargin(0.15);
-    gPad->SetRightMargin(0.05);
-    TGraph* ksgraph = new TGraph(axisvals.size(), axisval_array, ksval_array);
-    ksgraph->SetTitle(Form(";%s;Abs(#Delta_{CDF})", hist1->GetXaxis()->GetTitle()));
-    ksgraph->GetYaxis()->SetRangeUser(0, ks*1.2);
-    ksgraph->Draw("al*");
-    thresholdLine->DrawLine(comparison_threshold, 0, comparison_threshold, ks*1.2);
-    ksLine->DrawLine(axis_ks, 0, axis_ks, ks*1.2);
-    drawText(Form("KS = max(#Delta_{CDF}): %.4f", ks), 0.9, 0.8, true);
-    drawText(Form("KS found at %s = %.2f", hist1->GetXaxis()->GetTitle(), axis_ks), 0.9, 0.75, true);
-    
-    if (iteration >= 0) drawText(Form("#Deltap_{T} KS Fitting Algorithm Iteration %i", iteration), 0.95, 0.93, true);
-    
-    c->cd(3);
-    gPad->SetLeftMargin(0.15);
-    gPad->SetRightMargin(0.05);
-    gPad->SetLogy();
-    TGraph* cdf1_graph_log = drawCDF(hist1, horizShiftOnHist1, true, true);
-    TGraph* cdf2_graph_log = drawCDF(hist2, 0, true, true);
-    TMultiGraph* both_cdf_log = new TMultiGraph();
-    both_cdf_log->SetTitle(Form(";%s;1-CDF", hist1->GetXaxis()->GetTitle()));
-    cdf1_graph_log->SetLineColor(kRed+2);
-    cdf1_graph_log->SetMarkerColor(kRed+2);
-    cdf1_graph_log->SetMarkerStyle(24);
-    cdf2_graph_log->SetLineColor(kBlue+2);
-    cdf2_graph_log->SetMarkerColor(kBlue+2);
-    cdf2_graph_log->SetMarkerStyle(25);
-    both_cdf_log->Add(cdf1_graph_log);
-    both_cdf_log->Add(cdf2_graph_log);
-    both_cdf_log->GetYaxis()->SetRangeUser(1e-11, 1);
-    both_cdf_log->Draw("al*");
-    thresholdLine->DrawLine(comparison_threshold, 0, comparison_threshold, 1);
-    ksLine->DrawLine(axis_ks, 0, axis_ks, 1);
-    
-    c->cd(4);
-    gPad->SetLeftMargin(0.15);
-    gPad->SetRightMargin(0.05);
-    gPad->SetLogy();
-    TGraph* ksgraph_log = static_cast<TGraph*>(ksgraph->Clone());
-    ksgraph_log->GetYaxis()->SetRangeUser(1e-11, 1);
-    ksgraph_log->Draw("al*");
-    thresholdLine->DrawLine(comparison_threshold, 0, comparison_threshold, 1);
-    ksLine->DrawLine(axis_ks, 0, axis_ks, 1);
-    c->SaveAs(Form("%s.pdf",saveName));
-//    c->SaveAs(Form("../tmp/tmpplot/%s.pdf",saveName));
-    
-    delete c;
-  }
-  return ks;
-}
-
-//========================================================================== KS Rewrite
-
-std::vector<std::vector<double>> CDF_FromHist_new(TH1* hist, double thresh_min = INT_MIN, double thresh_max = INT_MAX) {
+/// Computes the Empirical Cumulative Distribution Function for a 1D hist.
+/// -----------------------*IMPORTANT*-----------------------
+/// The results will vary enormously with the choice of interpolation mode:
+///     1) Linear interpolation:
+///       Assumes the contents within a bin are uniformly distributed. This is generally a bad assumption
+///     2) Cubic Spline Interpolation
+///       Not yet implemented
+///     3) Root-default curve interpolation algorithm
+///       See Ref. https://academic.oup.com/comjnl/article/13/4/392/540402
+/// ---------------------------------------------------------
+/// Input must be either TH1D or TH1F type; other types will throw an error.
+///
+/// The output is a vector of ordered pairs (axis value, CDF) each of which
+/// is individually formed as a vector.
+std::vector<std::vector<double>> CDF_FromHist_new(TH1* hist,
+                                                  double thresh_min = INT_MIN,
+                                                  double thresh_max = INT_MAX,
+                                                  int interpolation_mode = 1) {
   // Verify that input hist is of compatible type
   int histflag = getHistType(hist);
   TAxis* axis = hist->GetXaxis();
@@ -782,7 +380,7 @@ std::vector<std::vector<double>> CDF_FromHist_new(TH1* hist, double thresh_min =
     default:
       std::cout<<"Error in <utils/hist_tools::CDF_FromHist>: Input hist type is not TH1F or TH1D."<<std::endl;
       return cdf;
-  } 
+  }
   
   // Test for bad thresholds, throw errors if necessary,
   if (thresh_min > thresh_max) {
@@ -829,9 +427,33 @@ std::vector<std::vector<double>> CDF_FromHist_new(TH1* hist, double thresh_min =
     cdf_counter += hist->GetBinContent(ibin) * axis->GetBinWidth(ibin) / norm;
     cpair = {axis->GetBinLowEdge(ibin+1), cdf_counter};
     cdf.push_back(cpair);
+  }
+  
+  if (interpolation_mode == 1) return cdf;
+  if (cdf.size() <= 2) return cdf;
+  
+  // Perform an interpolation on the CDF if specified.
+  std::vector<double> bin_axis;
+  std::vector<double> cdf_axis;
+  int npoint = cdf.size();
+  for (int i = 0; i < npoint; ++i) {
+    bin_axis.push_back(cdf.at(i).at(0));
+    cdf_axis.push_back(cdf.at(i).at(1));
+  }TGraph* interpolated = Smooth(new TGraph(npoint, bin_axis.data(), cdf_axis.data()), true);
+  Double_t* interp_binaxis = interpolated->GetX();
+  Double_t* interp_cdfaxis = interpolated->GetY();
+  npoint = interpolated->GetN();
+  cdf.clear();
+  for (int i = 0; i < npoint; ++i) {
+    if (interp_cdfaxis[i] > 1 || interp_cdfaxis[i] < 0) continue;
+    cpair = {interp_binaxis[i], interp_cdfaxis[i]};
+//    std::cout << "bin ax : " << interp_binaxis[i] << "\tcdf : " << interp_cdfaxis[i] << std::endl;
+    cdf.push_back(cpair);
   }return cdf;
 }
 
+// Draws and returns a graphical representation of the CDF
+// Result is drawn on the current gPad unless suppressed.
 TGraph* drawCDF_new(TH1* hist,
                     double horiz_shift = 0,
                     double thresh_min = INT_MIN,
@@ -866,6 +488,11 @@ TGraph* drawCDF_new(TH1* hist,
   }return cdf_graph;
 }
 
+// Computes the Kolgomorov-Smirnov (KS) statistic for 2 histograms
+//
+// The variable horizShiftOnHist1 allows for the CDF of hist1 to be
+// shifted horizontally by some amount before computing the KS.
+// Only horizontal axis values above comparison_threshold are considered.
 double KS_statistic_new(TH1* hist1,
                         TH1* hist2,
                         double horizontal_shift = 0,
@@ -898,6 +525,7 @@ double KS_statistic_new(TH1* hist1,
       temp = axis2->GetBinLowEdge(axis2->GetNbins()+1);
     thresh_max = temp;
   }
+  
   std::vector<std::vector<double>> cdf1 = CDF_FromHist_new(hist1, thresh_min, thresh_max);
   std::vector<std::vector<double>> cdf2 = CDF_FromHist_new(hist2, thresh_min, thresh_max);
   double n1 = cdf1.size();
@@ -909,6 +537,7 @@ double KS_statistic_new(TH1* hist1,
     std::cout<<"Warning in <utils/hist_tools::KS_statistic>: Input CDFs have disjoint domains. No meaningful comparison can be made."<<std::endl;
     return 1;
   }
+  
   
   // Compute KS
   std::vector<std::vector<double>> ks;

@@ -18,7 +18,7 @@ void test_translate_simple();
 void test_rotate_simple();
 
 void util_diagnostics() {
-  test_ks();
+  test_cdf();
   return;
 }
 
@@ -26,21 +26,31 @@ void util_diagnostics() {
 void test_ks() {
   TFile *fin = new TFile("test_data/test.root");
   TH1D* testhist_unf = fin->Get<TH1D>("test");
-  TH1D* testhist_gaus = fin->Get<TH1D>("test_gaus_2");
   TH1D* testhist_nnf = fin->Get<TH1D>("nonunif_bins");
+  TH1D* testhist_gaus = fin->Get<TH1D>("test_gaus_2");
   TH1D* testhist_sml = fin->Get<TH1D>("test_small");
   TH1D* testhist_ref = fin->Get<TH1D>("test_ref");
   
+  TCanvas *canvas = new TCanvas();
   
   TFile *infile_ppReference = new TFile("test_data/pp_reference.root");
   TH1F* sigref_pp = static_cast<TH1F*>(infile_ppReference->Get("Hist1D_y2_1"));
   
   TH1* hist_totest_1 = testhist_unf;
 //  TH1* hist_totest_2 = static_cast<TH1D*>(testhist_unf->Clone());
-  TH1* hist_totest_2 = sigref_pp;
+  TH1* hist_totest_2 = testhist_sml;
+  
+  double thresh_min = 1;
+  double thresh_max = 5;
+  drawCDF_new(testhist_unf, 0, thresh_min, thresh_max, false, false);
+  
+//  drawCDF_new(testhist_sml);
+  
+//  std::vector<std::vector<double>> cdf1 = CDF_FromHist_new(testhist_unf, 1, 4);
   
 //  KS_statistic(testhist_sml, translateHist(testhist_sml, -0.1));
-  cout << KS_statistic_new(hist_totest_1, hist_totest_2, 2, 0, 7, true, "test_plots/ks_new.pdf") << endl;
+//  cout << KS_statistic_new(hist_totest_1, hist_totest_2) << std::endl;
+  cout << KS_statistic_new(hist_totest_1, hist_totest_2, 0, 0, 7, true, "test_plots/ks_new.pdf") << endl;
 //  cout << KS_statistic(hist_totest_1, hist_totest_2, -4, -4, false, true, "test_plots/ks_old.pdf") << endl;
   
 //  TH1* hist1,
@@ -75,8 +85,8 @@ void test_cdf() {
   canvas->SetWindowSize(1000, 500);
   canvas->Divide(2, 1);
   
-  double thresh_min = 4;
-  double thresh_max = 4.8;
+  double thresh_min = -5;
+  double thresh_max = 5;
   
   canvas->cd(1);
   testhist_unf->Draw("hist");
@@ -86,16 +96,24 @@ void test_cdf() {
   TGraph* cgraph;
   cgraph = drawCDF_new(testhist_unf, 0, thresh_min, thresh_max, false, true);
   cgraph->SetLineColor(kBlue);
+  cgraph->SetMarkerColor(kBlack);
   graph->Add(cgraph);
-  cgraph = drawCDF(testhist_unf, 0, false, true);
-  cgraph->SetLineColor(kRed);
-  graph->Add(cgraph);
+//  cgraph = drawCDF(testhist_unf, 0, false, true);
+//  cgraph->SetLineColor(kRed);
+//  graph->Add(cgraph);
   graph->Draw("al");
   TLine *rangeLine = new TLine();
   setStyleLine(rangeLine, "thin dashed gray");
   rangeLine->DrawLine(thresh_min, 0, thresh_min, 1);
   rangeLine->DrawLine(thresh_max, 0, thresh_max, 1);
   canvas->SaveAs("test_plots/CDF_gaus.pdf");
+  
+  TCanvas *drawBoth = new TCanvas();
+  drawBoth->SetCanvasSize(500, 500);
+  graph->Draw("ac");
+//  testhist_unf->Scale(1./testhist_unf->Integral("width"));
+//  testhist_unf->Draw("hist same");
+  drawBoth->SaveAs("test_plots/drawboth.pdf");
   
   canvas->cd(1);
   gPad->SetLogy();
@@ -108,13 +126,15 @@ void test_cdf() {
   cgraph = drawCDF_new(sigref_pp, 0, thresh_min, thresh_max, false, true);
   cgraph->SetLineColor(kBlue);
   graph->Add(cgraph);
-  cgraph = drawCDF(sigref_pp, 0, false, true);
-  cgraph->SetLineColor(kRed);
-  graph->Add(cgraph);
+//  cgraph = drawCDF(sigref_pp, 0, false, true);
+//  cgraph->SetLineColor(kRed);
+//  graph->Add(cgraph);
   graph->Draw("al");
   rangeLine->DrawLine(thresh_min, 0, thresh_min, 1);
   rangeLine->DrawLine(thresh_max, 0, thresh_max, 1);
   canvas->SaveAs("test_plots/CDF_ppReference.pdf");
+  
+  
 }
 
 // Testing for more accurate translate macro

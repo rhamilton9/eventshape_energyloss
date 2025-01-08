@@ -7,6 +7,44 @@
 #include "../utils/hist_tools.h"
 #include "../utils/glauber_tools.h"
 
+int global_event;
+
+double varianceArea(TH2D* energy_density) {
+  double ctot_x = 0;
+  double ctot_y = 0;
+  double ctot_x2 = 0;
+  double ctot_y2 = 0;
+  double ctot_xy = 0;
+  double tot_weight = 0;
+  double cweight;
+  TAxis* refaxis_x = energy_density->GetXaxis();
+  TAxis* refaxis_y = energy_density->GetYaxis();
+  for (int ix = 1; ix <= refaxis_x->GetNbins(); ++ix) {
+    for (int iy = 1; iy <= refaxis_y->GetNbins(); ++iy) {
+      cweight = energy_density->GetBinContent(ix, iy);
+      ctot_x += cweight * refaxis_x->GetBinCenter(ix);
+      ctot_y += cweight * refaxis_y->GetBinCenter(iy);
+      ctot_x2 += cweight * refaxis_x->GetBinCenter(ix) * refaxis_x->GetBinCenter(ix);
+      ctot_y2 += cweight * refaxis_y->GetBinCenter(iy) * refaxis_y->GetBinCenter(iy);
+      ctot_xy += cweight * refaxis_x->GetBinCenter(ix) * refaxis_y->GetBinCenter(iy);
+      tot_weight += cweight;
+    }
+  }
+  double sig_xx = (ctot_x2 - ctot_x*ctot_x/tot_weight);
+  double sig_yy = (ctot_y2 - ctot_y*ctot_y/tot_weight);
+  double sig_xy = (ctot_xy - ctot_x*ctot_y/tot_weight);
+  double area = 4*TMath::Pi() * TMath::Sqrt( (sig_xx * sig_yy - sig_xy * sig_xy) / (tot_weight*tot_weight));
+  if (area > 200) {
+    std::cout << "Large area " << area << " at event " << global_event << "!" << std::endl;
+    TCanvas* c = new TCanvas();
+    energy_density->Draw("colz");
+    c->SetRightMargin(0.2);
+    c->SaveAs(Form("~/Desktop/large_area%i.pdf", global_event));
+    delete c;
+    return 0;
+  }return area;
+}
+
 void eventshape_summary() {
   const double bmin = getImpactParameterFromCentralityClass(centralitybin_low,  sqrt_s, (char*) speciesA, (char*) speciesB);
   const double bmax = getImpactParameterFromCentralityClass(centralitybin_high, sqrt_s, (char*) speciesA, (char*) speciesB);
@@ -19,36 +57,87 @@ void eventshape_summary() {
   const char* infilename = Form("../data.nosync/%s_%.2fTeV/glauber/glauber_compiled_%s.root", species, sqrt_s, refstring);
   TFile *fin = new TFile(infilename);
   if (fin->IsZombie()) {
-    std::cout << "Error in eventshape_summary.c:" << std::endl;
+    std::cout << "Error in <src/eventshape_summary.c>:" << std::endl;
     std::cout << Form("Reference file (%s) does not exist!", infilename) << std::endl;
     std::cout << "Check specfied parameters, or run compile_glauber.c to generate this file." << std::endl;
+    return;
+  }
+  
+  // Set method for edge extraction based on ../config.h.
+  // Throws error if unrecognized algorithm is specified.
+  TString edge_algo_string = eventshape_edgefind_method;
+  int edgealgo_store;
+  const int nEdgeAlgo = 4;
+  const char edgealgo_str[nEdgeAlgo][10] = {"radmean", "gradmean", "gradmax", "zcontour"};
+  if (edge_algo_string == "radial_mean")
+    edgealgo_store = 0;
+  else if (edge_algo_string == "gradnorm_mean")
+    edgealgo_store = 1;
+  else if (edge_algo_string == "gradnorm_max")
+    edgealgo_store = 2;
+  else if (edge_algo_string == "z_contour")
+    edgealgo_store = 3;
+  else {
+    std::cout << "Error in <src/eventshape_summary.c>:" << std::endl;
+    std::cout << Form("Requested edge extraction algorithm \"%s\" does not exist.", eventshape_edgefind_method) << std::endl;
+    std::cout << "Check specfied inputs in config.h" << std::endl;
     return;
   }
   
   // Open output file or create it if it doesn't exist.
   // Attempt to access relevant TTree, write data into new tree.
   // Somewhat inefficient with data handling, since TTree entries cannot be overwritten.
+  // A new tree must be created on each run of the algorithm.
   // However, since we are limited to ~10 entries, this inefficiency is effectively harmless.
-  double event_avg_area;
+  const int nmethod_area = 6;
+  double event_avg_area_arit_noalign[nmethod_area];
+  double event_avg_area_arit_cmalign[nmethod_area];
+  double event_avg_area_arit_flalign[nmethod_area];
+  double event_avg_area_geom_noalign[nmethod_area];
+  double event_avg_area_geom_cmalign[nmethod_area];
+  double event_avg_area_geom_flalign[nmethod_area];
   double botcentbin_local;
   double topcentbin_local;
   TFile* datfile = new TFile(Form("../data.nosync/%s_%.2fTeV/eventshape_energyloss.root", species, sqrt_s), "update");
   TTree* eventshape_tree = new TTree("tempname", "eventshape_tree");
   eventshape_tree->Branch("centralitybin_low", &botcentbin_local);
   eventshape_tree->Branch("centralitybin_high", &topcentbin_local);
-  eventshape_tree->Branch("eventshape_area", &event_avg_area);
+  eventshape_tree->Branch("eventshape_area_arit_noalign", event_avg_area_arit_noalign,
+                          Form("eventshape_area_arit_noalign[%i]/D", nmethod_area));
+  eventshape_tree->Branch("eventshape_area_arit_cmalign", event_avg_area_arit_cmalign,
+                          Form("eventshape_area_arit_cmalign[%i]/D", nmethod_area));
+  eventshape_tree->Branch("eventshape_area_arit_flalign", event_avg_area_arit_flalign,
+                          Form("eventshape_area_arit_flalign[%i]/D", nmethod_area));
+  eventshape_tree->Branch("eventshape_area_geom_noalign", event_avg_area_geom_noalign,
+                          Form("eventshape_area_geom_noalign[%i]/D", nmethod_area));
+  eventshape_tree->Branch("eventshape_area_geom_cmalign", event_avg_area_geom_cmalign,
+                          Form("eventshape_area_geom_cmalign[%i]/D", nmethod_area));
+  eventshape_tree->Branch("eventshape_area_geom_flalign", event_avg_area_geom_flalign,
+                          Form("eventshape_area_geom_flalign[%i]/D", nmethod_area));
   if (datfile->Get("eventshape_tree")) {
     // Outfile exists. Scan and discard previous data in the same centrality bin if applicable.
     TTreeReader* reader = new TTreeReader("eventshape_tree", datfile);
     TTreeReaderValue<Double_t> centreader_low(*reader, "centralitybin_low");
     TTreeReaderValue<Double_t> centreader_high(*reader, "centralitybin_high");
-    TTreeReaderValue<Double_t> eventshape_reader(*reader, "eventshape_area");
+    TTreeReaderArray<Double_t> eventshape_reader_ano(*reader, "eventshape_area_arit_noalign");
+    TTreeReaderArray<Double_t> eventshape_reader_acm(*reader, "eventshape_area_arit_cmalign");
+    TTreeReaderArray<Double_t> eventshape_reader_afl(*reader, "eventshape_area_arit_flalign");
+    TTreeReaderArray<Double_t> eventshape_reader_gno(*reader, "eventshape_area_geom_noalign");
+    TTreeReaderArray<Double_t> eventshape_reader_gcm(*reader, "eventshape_area_geom_cmalign");
+    TTreeReaderArray<Double_t> eventshape_reader_gfl(*reader, "eventshape_area_geom_flalign");
     
     reader->Restart();
     while (reader->Next()) {
       if (*centreader_low == centralitybin_low &&
           *centreader_high == centralitybin_high) continue;
-      event_avg_area = *eventshape_reader;
+      for (int i = 0; i < 6; ++i) {
+        event_avg_area_arit_noalign[i] = eventshape_reader_ano[i];
+        event_avg_area_arit_cmalign[i] = eventshape_reader_acm[i];
+        event_avg_area_arit_flalign[i] = eventshape_reader_afl[i];
+        event_avg_area_geom_noalign[i] = eventshape_reader_gno[i];
+        event_avg_area_geom_cmalign[i] = eventshape_reader_gcm[i];
+        event_avg_area_geom_flalign[i] = eventshape_reader_gfl[i];
+      }
       botcentbin_local = *centreader_low;
       topcentbin_local = *centreader_high;
       eventshape_tree->Fill();
@@ -62,11 +151,11 @@ void eventshape_summary() {
   // Get data and compiled histograms from reference file.
   TVectorD gendata_Ntotal = *(TVectorD*) fin->Get("gendata_Ntotal");
   int nEvent = gendata_Ntotal[0];
-  TH2D* refhist_shape[3];
+  TH2D* refhist_shape[2][3];
   const char scaling_str[2][5] = {"arit", "geom"};
   const char alignstr[3][8] = {"noalign", "cmalign", "aligned"};
   const char alignstr_formal[3][25] = {"No Align", "CM Aligned", "CM, #Psi_{2} Aligned"};
-  for (int i:{0,1,2}) refhist_shape[i] = static_cast<TH2D*> (fin->Get(Form("%s_eventshape_%s_%s",refstring,alignstr[i], scaling_str[isGeometric])));
+  for (int i:{0,1,2,3,4,5}) refhist_shape[i/3][i%3] = static_cast<TH2D*> (fin->Get(Form("%s_eventshape_%s_%s",refstring,alignstr[i%3], scaling_str[i/3])));
   TH1D* refhist_gendata[3];
   refhist_gendata[0] = static_cast<TH1D*> (fin->Get(Form("%s_npart_hist",refstring)));
   refhist_gendata[1] = static_cast<TH1D*> (fin->Get(Form("%s_ncoll_hist",refstring)));
@@ -79,7 +168,7 @@ void eventshape_summary() {
   for (int i = 0; i < 12; ++i) color_sample[i] = TColor::GetPalette().At(TColor::GetPalette().GetSize() * i/12);
   gStyle->SetPalette(kGreyYellow);
   Int_t color_bg = TColor::GetPalette().At(0);
-  Int_t color_ongray[2] = {kRed+2, kAzure};
+  Int_t color_ongray[nEdgeAlgo] = {kBlue, kRed, kGreen, kMagenta};
   
   TCanvas *doubleplot = new TCanvas();
   doubleplot->SetCanvasSize(1000, 500);
@@ -114,282 +203,449 @@ void eventshape_summary() {
   // Set up arrays, compute gradients of input hists, and prepare for averaging
   const int nSample_r = 100;
   double phidat[nSample_r];
-  double rdat[3][2][nSample_r];
+  double rdat[2][3][nEdgeAlgo][nSample_r];
 //  double xdat[3][2][nSample_r+1];
 //  double ydat[3][2][nSample_r+1];
-  TH2D* gradnorm[3];
-  TH2D* gradnorm_polar[3];
-  for (int i = 0; i < 3; ++i) {
-    gradnorm[i] = gradientNorm(refhist_shape[i]);
-    gradnorm_polar[i] = new TH2D(Form("gradnorm_polar_%s", alignstr[i]),
-                                 ";Azimuth (#phi) [rad];r [fm];|#nablaE(x,y)| [a.u.]",
-                                 nSample_r,-TMath::Pi(),TMath::Pi(),
-                                 gradnorm[i]->GetXaxis()->GetNbins()/2,0,-gradnorm[i]->GetXaxis()->GetBinLowEdge(1));
+  TH2D* gradnorm[2][3];
+  TH2D* gradnorm_polar[2][3];
+  for (int iScale = 0; iScale < 2; ++iScale) {
+    for (int iRef = 0; iRef < 3; ++iRef) {
+      refhist_shape[iScale][iRef]->GetZaxis()->SetTitle("E [GeV/fm^{2}]");
+      refhist_shape[iScale][iRef]->GetZaxis()->SetTitleOffset(1.3);
+      gradnorm[iScale][iRef] = gradientNorm(refhist_shape[iScale][iRef]);
+      gradnorm[iScale][iRef]->GetZaxis()->SetTitle("Norm(#nablaE(x,y)) [GeV/fm^{3}]");
+      gradnorm[iScale][iRef]->GetZaxis()->SetTitleOffset(1.3);
+      gradnorm_polar[iScale][iRef] = new TH2D(Form("gradnorm_polar_%s_%s", scaling_str[iScale], alignstr[iRef]),
+                                   ";Azimuth (#phi) [rad];r [fm];Norm(#nablaE(x,y)) [GeV/fm^{3}]",
+                                   nSample_r,-TMath::Pi(),TMath::Pi(),
+                                   gradnorm[iScale][iRef]->GetXaxis()->GetNbins()/2,0,-gradnorm[iScale][iRef]->GetXaxis()->GetBinLowEdge(1));
+      gradnorm_polar[iScale][iRef]->GetZaxis()->SetTitleOffset(1.3);
+    }
   }
   
   // Setup for harmonics
-  double meanr[3][2];
-  double harmonic_x[3][2][5];
-  double harmonic_y[3][2][5];
-  TGraph* graph_r[3][2];
-  TGraph* graph_r_onplot[3][2];
-  TGraph* graph_harmonicfit[3][2][4];
-  TMultiGraph* full_harmonics[3][2];
-  TH1D* hist_coeffcients[3][2];
+  double meanr[3][nEdgeAlgo];
+  double harmonic_x[3][nEdgeAlgo][5];
+  double harmonic_y[3][nEdgeAlgo][5];
+  TGraph* graph_r[3][nEdgeAlgo];
+  TGraph* graph_r_onplot[3][nEdgeAlgo];
+  TGraph* graph_harmonicfit[3][nEdgeAlgo][4];
+  TMultiGraph* full_harmonics[3][nEdgeAlgo];
+  TH1D* hist_coeffcients[3][nEdgeAlgo];
   
-  
-  // Loop and compute radial avg distance for each input hists
-  for (int iRef = 0; iRef < 3; ++iRef) {
-    // Loop over the three input reference hists
-    
-    //--------------------------------------------------------- Compute Edge r(phi)
-    
-    // Compute edge from grad-norm method
-    double cr, cphi, csum, csum_r, val;
-    for (int iPhi = 1; iPhi <= nSample_r; ++iPhi) {
-      // Loop over azimuth for mean <r> in each azimuth bin
-      cphi = gradnorm_polar[iRef]->GetXaxis()->GetBinCenter(iPhi);
-      csum_r = 0;
-      csum = 0;
-      for (int ir = 1; ir <= gradnorm[iRef]->GetXaxis()->GetNbins()/2; ++ir) {
-        // Loop for integration/averaging over radius
-        cr = gradnorm_polar[iRef]->GetYaxis()->GetBinCenter(ir);
-        val = gradnorm[iRef]->GetBinContent(gradnorm[iRef]->GetXaxis()->FindBin(cr*TMath::Cos(cphi)),
-                                            gradnorm[iRef]->GetYaxis()->FindBin(cr*TMath::Sin(cphi)));
+  // Extract the QGP edge for each scaling and averaging strategy, and provide some summary plots of the results.
+  for (int iScale = 0; iScale < 2; ++iScale) {
+    for (int iRef = 0; iRef < 3; ++iRef) {
+      // Loop over the three input reference hists
+      
+      //--------------------------------------------------------- Compute Edge r(phi)
+      
+      // Compute edge from average radius
+      double cr, cphi, csum, csum_r, val;
+      for (int iPhi = 1; iPhi <= nSample_r; ++iPhi) {
+        // Loop over azimuth for mean <r> in each azimuth bin
+        cphi = gradnorm_polar[iScale][iRef]->GetXaxis()->GetBinCenter(iPhi);
+        csum_r = 0;
+        csum = 0;
+        for (int ir = 1; ir <= gradnorm[iScale][iRef]->GetXaxis()->GetNbins()/2; ++ir) {
+          // Loop for integration/averaging over radius
+          cr = gradnorm_polar[iScale][iRef]->GetYaxis()->GetBinCenter(ir);
+          val = refhist_shape[iScale][iRef]->GetBinContent(refhist_shape[iScale][iRef]->GetXaxis()->FindBin(cr*TMath::Cos(cphi)),
+                                                           refhist_shape[iScale][iRef]->GetYaxis()->FindBin(cr*TMath::Sin(cphi)));
+          
+          // Add to weights for finding radial avg.
+          // Note an extra factor of cr for cylindrical Jacobian.
+          csum += cr * val;
+          csum_r += cr * cr * val;
+        }// end of loop over radius
         
-        // Add to weights for finding radial avg.
-        // Note an extra factor of cr for cylindrical Jacobian.
-        csum += cr * val;
-        csum_r += cr * cr * val;
-        gradnorm_polar[iRef]->Fill(cphi, cr, val);
-      }// end of loop over radius
-      
-      // Store average radius at this azimuth
-      rdat[iRef][0][iPhi-1] = csum_r/csum;
-      if (iRef == 0) phidat[iPhi-1] = cphi;
-    }// end of loop over azimuth
-    
-    // Compute edge from z-contour method
-    double contour_zlevel = contour_z * refhist_shape[iRef]->GetMaximum();
-    double val_next, r_prev;
-    for (int iPhi = 0; iPhi < nSample_r; ++iPhi) {
-      cphi = phidat[iPhi];
-      // Loop over azimuth for r contour in each azimuth bin
-      r_prev = 0;
-      val = refhist_shape[iRef]->GetBinContent(refhist_shape[iRef]->GetXaxis()->FindBin(0.),
-                                               refhist_shape[iRef]->GetYaxis()->FindBin(0.));
-      for (int ir = 1; ir < refhist_shape[iRef]->GetXaxis()->GetNbins()/2; ++ir) {
-        cr = gradnorm_polar[iRef]->GetYaxis()->GetBinCenter(ir);
-        // loop over radius until a pair of bins is found that holds the contour
-        val_next = refhist_shape[iRef]->GetBinContent(refhist_shape[iRef]->GetXaxis()->FindBin(cr*TMath::Cos(cphi)),
-                                                      refhist_shape[iRef]->GetYaxis()->FindBin(cr*TMath::Sin(cphi)));
-        if (val_next < contour_zlevel && val > contour_zlevel) break;
+        // Store average radius at this azimuth
+        if (csum_r/csum > 1e10) std::cout << "bad calc on avg rad at iPhi = " << iPhi-1 << std::endl;
+        rdat[iScale][iRef][0][iPhi-1] = csum_r/csum;
         
-        // if no break, set last vals to current vals and iterate again.
-        val = val_next;
-        r_prev = cr;
-      }
+        // Fill phidat on first iteration for later plotting
+        if (iRef == 0) phidat[iPhi-1] = cphi;
+      }// end of loop over azimuth
       
-      // use the found bins to approximate the radial location of the contour
-      // Uses local linear approximation from the boundary values
-      rdat[iRef][1][iPhi] = (cr - r_prev)/(val_next - val) * (contour_zlevel - val) + r_prev;
-    }
-    
-    //--------------------------------------------------------- Compute Harmonics
-    
-    hist_coeffcients[iRef][0] = new TH1D(Form("hist_harmoniccoefs_%s_gradnorm",alignstr[iRef]),
-                                         ";Fourier Mode (n); Fourier Coefficient c_{n} = #sqrt{a_{n}^{2} + b_{n}^{2}}",5,1,6);
-    hist_coeffcients[iRef][1] = new TH1D(Form("hist_harmoniccoefs_%s_contour",alignstr[iRef]),
-                                         ";Fourier Mode (n); Fourier Coefficient c_{n} = #sqrt{a_{n}^{2} + b_{n}^{2}}",5,1,6);
-    for (int iType = 0; iType < 2; ++iType) {
-      // Compute mean <r(phi)> (zero-order harmonic)
-      double cmean = 0;
-      for (int iPhi = 0; iPhi < nSample_r; ++iPhi) cmean += rdat[iRef][iType][iPhi];
-      meanr[iRef][iType] = cmean/nSample_r;
+      // Compute edge from grad-norm average radius
+      for (int iPhi = 1; iPhi <= nSample_r; ++iPhi) {
+        // Loop over azimuth for mean <r> in each azimuth bin
+        cphi = gradnorm_polar[iScale][iRef]->GetXaxis()->GetBinCenter(iPhi);
+        csum_r = 0;
+        csum = 0;
+        for (int ir = 1; ir <= gradnorm[iScale][iRef]->GetXaxis()->GetNbins()/2; ++ir) {
+          // Loop for integration/averaging over radius
+          cr = gradnorm_polar[iScale][iRef]->GetYaxis()->GetBinCenter(ir);
+          val = gradnorm[iScale][iRef]->GetBinContent(gradnorm[iScale][iRef]->GetXaxis()->FindBin(cr*TMath::Cos(cphi)),
+                                                      gradnorm[iScale][iRef]->GetYaxis()->FindBin(cr*TMath::Sin(cphi)));
+          
+          // Add to weights for finding radial avg.
+          // Note an extra factor of cr for cylindrical Jacobian.
+          csum += cr * val;
+          csum_r += cr * cr * val;
+          gradnorm_polar[iScale][iRef]->Fill(cphi, cr, val);
+        }// end of loop over radius
+        
+        // Store average radius at this azimuth
+        if (csum_r/csum > 1e10) std::cout << "bad calc on gradnorm at iPhi = " << iPhi-1 << std::endl;
+        rdat[iScale][iRef][1][iPhi-1] = csum_r/csum;
+        
+        // store max gradient at this azimuth
+        //        rdat[iScale][iRef][2][iPhi-1] = gradnorm_polar[iScale][iRef]->GetYaxis()->GetBinCenter(gradnorm_polar[iScale][iRef]->GetYaxis()->FindBin(cmax_r));
+      }// end of loop over azimuth
       
-      // Compute harmonics
-      double ca, cb;
-      for (int iMode = 1; iMode <= 5; ++iMode) {
-        ca = 0; cb = 0;
-        for (int iPhi = 0; iPhi < nSample_r; ++iPhi) {
-          ca += rdat[iRef][iType][iPhi] * TMath::Cos(iMode * phidat[iPhi]);
-          cb += rdat[iRef][iType][iPhi] * TMath::Sin(iMode * phidat[iPhi]);
+      // Compute edge from grad-norm max
+      int cmax_r_index;
+      TAxis* refaxis_r;
+      for (int iPhi = 1; iPhi <= gradnorm_polar[iScale][iRef]->GetXaxis()->GetNbins(); ++iPhi) {
+        cmax_r_index = 0;
+        for (int ir = 1; ir <= gradnorm_polar[iScale][iRef]->GetYaxis()->GetNbins(); ++ir) {
+          if (gradnorm_polar[iScale][iRef]->GetBinContent(iPhi, ir) >
+              gradnorm_polar[iScale][iRef]->GetBinContent(iPhi, cmax_r_index))
+            cmax_r_index = ir;
         }
-//        std::cout << ca/(TMath::Pi()) << endl;
-//        std::cout << cb/(TMath::Pi()) << endl;
-        harmonic_x[iRef][iType][iMode-1] = 2*ca/(nSample_r);
-        harmonic_y[iRef][iType][iMode-1] = 2*cb/(nSample_r);
-        
-        // Fill coef hist
-        hist_coeffcients[iRef][iType]->SetBinContent(iMode, TMath::Sqrt(TMath::Power(harmonic_x[iRef][iType][iMode-1], 2)
-                                                                + TMath::Power(harmonic_y[iRef][iType][iMode-1], 2)));
-        hist_coeffcients[iRef][iType]->GetXaxis()->SetBinLabel(iMode, Form("%i",iMode));
+        // Smooth sligthy by taking a wighted average ("CM") around the max point
+        refaxis_r = gradnorm_polar[iScale][iRef]->GetYaxis();
+        //        rdat[iScale][iRef][2][iPhi-1] = refaxis_r->GetBinCenter(cmax_r_index);
+        csum = 0;
+        csum_r = 0;
+        for (int iAvg = cmax_r_index - nsample_maxregion/2; iAvg <= cmax_r_index + nsample_maxregion/2; ++iAvg) {
+          if (iAvg < 1 || iAvg > refaxis_r->GetNbins()) continue;
+          val = gradnorm_polar[iScale][iRef]->GetBinContent(iPhi, iAvg);
+          cr = refaxis_r->GetBinCenter(iAvg);
+          csum_r += cr * cr * val;
+          csum += cr*val;
+        }rdat[iScale][iRef][2][iPhi-1] = csum_r / csum;
       }
       
-      // Make and store graphs of harmonic sum approximations
-      double hdat[nSample_r];
-      Int_t linestyle[4] = {1, 2, 5, 8};
-      int color_idx[4] = {2, 4, 7, 9};
-      int moderef[4][4] = {{1, 0, 0, 0},
-                           {0, 1, 0, 0},
-                           {0, 0, 1, 0},
-                           {0, 0, 0, 1},};
-      for (int iAppx = 0; iAppx < 4; ++ iAppx) {
-        for (int iPhi = 0; iPhi < nSample_r; ++iPhi) {
-          // Fill graph data
-          hdat[iPhi] = meanr[iRef][iType]
-            + moderef[iAppx][0] * (harmonic_x[iRef][iType][0] * TMath::Cos(1*phidat[iPhi])
-                                    + harmonic_y[iRef][iType][0] * TMath::Sin(1*phidat[iPhi]))
-            + moderef[iAppx][1] * (harmonic_x[iRef][iType][1] * TMath::Cos(2*phidat[iPhi])
-                                    + harmonic_y[iRef][iType][1] * TMath::Sin(2*phidat[iPhi]))
-            + moderef[iAppx][2] * (harmonic_x[iRef][iType][2] * TMath::Cos(3*phidat[iPhi])
-                                    + harmonic_y[iRef][iType][2] * TMath::Sin(3*phidat[iPhi]))
-            + moderef[iAppx][3] * (harmonic_x[iRef][iType][3] * TMath::Cos(4*phidat[iPhi])
-                                    + harmonic_y[iRef][iType][3] * TMath::Sin(4*phidat[iPhi]));
-        }
-        // graph settings
-        graph_harmonicfit[iRef][iType][iAppx] = new TGraph(nSample_r, phidat, hdat);
-        graph_harmonicfit[iRef][iType][iAppx]->SetLineStyle(linestyle[iAppx]);
-        graph_harmonicfit[iRef][iType][iAppx]->SetLineColor(color_sample[color_idx[iAppx]]);
-      }
-    }
-    
-    //--------------------------------------------------------- Non-composite level plots: Edge-finding
-    
-    // Make graphs for r(phi) display (edgefinding)
-    for (int iType:{0,1}) {
-      graph_r[iRef][iType] = new TGraph(nSample_r, phidat, rdat[iRef][iType]);
-      graph_r[iRef][iType]->SetLineColor(color_ongray[iType]);
-      
-      double xdat[nSample_r+1];
-      double ydat[nSample_r+1];
+      // Compute edge from z-contour method
+      double contour_zlevel = contour_z * refhist_shape[iScale][iRef]->GetMaximum();
+      double val_next, r_prev;
       for (int iPhi = 0; iPhi < nSample_r; ++iPhi) {
-        xdat[iPhi] = rdat[iRef][iType][iPhi] * TMath::Cos(phidat[iPhi]);
-        ydat[iPhi] = rdat[iRef][iType][iPhi] * TMath::Sin(phidat[iPhi]);
-      }xdat[nSample_r] = xdat[0]; ydat[nSample_r] = ydat[0];
+        cphi = phidat[iPhi];
+        // Loop over azimuth for r contour in each azimuth bin
+        r_prev = 0;
+        val = refhist_shape[iScale][iRef]->GetBinContent(refhist_shape[iScale][iRef]->GetXaxis()->FindBin(0.),
+                                                         refhist_shape[iScale][iRef]->GetYaxis()->FindBin(0.));
+        for (int ir = 1; ir < refhist_shape[iScale][iRef]->GetXaxis()->GetNbins()/2; ++ir) {
+          cr = gradnorm_polar[iScale][iRef]->GetYaxis()->GetBinCenter(ir);
+          // loop over radius until a pair of bins is found that holds the contour
+          val_next = refhist_shape[iScale][iRef]->GetBinContent(refhist_shape[iScale][iRef]->GetXaxis()->FindBin(cr*TMath::Cos(cphi)),
+                                                                refhist_shape[iScale][iRef]->GetYaxis()->FindBin(cr*TMath::Sin(cphi)));
+          if (val_next < contour_zlevel && val > contour_zlevel) break;
+          
+          // if no break, set last vals to current vals and iterate again.
+          val = val_next;
+          r_prev = cr;
+        }// end of loop over radius
+        
+        // use the found bins to approximate the radial location of the contour
+        // Uses local linear approximation from the boundary values
+        rdat[iScale][iRef][3][iPhi] = (cr - r_prev)/(val_next - val) * (contour_zlevel - val) + r_prev;
+        if (rdat[iScale][iRef][3][iPhi] > 1e10) std::cout << "bad calc on zcont at iPhi = " << iPhi << std::endl;
+      }// end of loop over azimuth
       
-      graph_r_onplot[iRef][iType] = new TGraph(nSample_r+1, xdat, ydat);
-      graph_r_onplot[iRef][iType]->SetLineColor(color_ongray[iType]);
-    }
-    
-    // Plot r(phi) graphs over hists
-    TLegend *leg = new TLegend(0.7, 0.7, 0.9, 0.95);
-    leg->SetLineWidth(0);
-    leg->SetFillColor(kGray);
-    
-    pads3[0]->cd();
-    refhist_shape[iRef]->Draw("colz");
-    graph_r_onplot[iRef][0]->SetLineStyle(3);
-    graph_r_onplot[iRef][0]->Draw("l");
-    graph_r_onplot[iRef][1]->Draw("l");
-    leg->AddEntry(graph_r_onplot[iRef][0], "Gradient", "l");
-    leg->AddEntry(graph_r_onplot[iRef][1], "Contour", "l");
-    leg->Draw();
-    
-    pads3[1]->cd();
-    gradnorm[iRef]->Draw("colz");
-    graph_r_onplot[iRef][0]->SetLineStyle(1);
-    graph_r_onplot[iRef][0]->Draw("l");
-    
-    pads3[2]->cd();
-    gradnorm_polar[iRef]->Draw("colz");
-    graph_r[iRef][0]->Draw("l");
-    tripleplot->SaveAs(Form("%s/edgefind_%s_centbin_%i-%i.pdf", outplot_dir, alignstr[iRef], centralitybin_low, centralitybin_high));
-    
-    //--------------------------------------------------------- Non-composite level plots: Harmonics
-    
-    // Make plot of original graphs alongside approximations
-    for (int iType = 0; iType < 2; ++iType) {
-      full_harmonics[iRef][iType] = new TMultiGraph();
-      full_harmonics[iRef][iType]->Add(graph_r[iRef][iType]);
-//      for (int iAppx = 0; iAppx < 4; ++iAppx) full_harmonics[iRef][iType]->Add(graph_harmonicfit[iRef][iType][iAppx]);
-      full_harmonics[iRef][iType]->Add(graph_harmonicfit[iRef][iType][1]);
+      //--------------------------------------------------------- Compute Harmonics
+      for (int iType = 0; iType < nEdgeAlgo; ++iType) {
+        hist_coeffcients[iRef][iType] = new TH1D(Form("hist_harmoniccoefs_%s_%s_%s",scaling_str[iScale],alignstr[iRef],edgealgo_str[iType]),
+                                                 ";Fourier Mode (n); Fourier Coefficient c_{n} = #sqrt{a_{n}^{2} + b_{n}^{2}}",5,1,6);
+        
+        // Compute mean <r(phi)> (zero-order harmonic)
+        double cmean = 0;
+        for (int iPhi = 0; iPhi < nSample_r; ++iPhi) cmean += rdat[iScale][iRef][iType][iPhi];
+        meanr[iRef][iType] = cmean/nSample_r;
+        
+        // Compute harmonics
+        double ca, cb;
+        for (int iMode = 1; iMode <= 5; ++iMode) {
+          ca = 0; cb = 0;
+          for (int iPhi = 0; iPhi < nSample_r; ++iPhi) {
+            ca += rdat[iScale][iRef][iType][iPhi] * TMath::Cos(iMode * phidat[iPhi]);
+            cb += rdat[iScale][iRef][iType][iPhi] * TMath::Sin(iMode * phidat[iPhi]);
+          }
+          //        std::cout << ca/(TMath::Pi()) << endl;
+          //        std::cout << cb/(TMath::Pi()) << endl;
+          harmonic_x[iRef][iType][iMode-1] = 2*ca/(nSample_r);
+          harmonic_y[iRef][iType][iMode-1] = 2*cb/(nSample_r);
+          // Fill coef hist
+          hist_coeffcients[iRef][iType]->SetBinContent(iMode, TMath::Sqrt(TMath::Power(harmonic_x[iRef][iType][iMode-1], 2)
+                                                                          + TMath::Power(harmonic_y[iRef][iType][iMode-1], 2)));
+          hist_coeffcients[iRef][iType]->GetXaxis()->SetBinLabel(iMode, Form("%i",iMode));
+        }
+        
+        // Make and store graphs of harmonic sum approximations
+        double hdat[nSample_r];
+        Int_t linestyle[4] = {1, 2, 5, 8};
+        int color_idx[4] = {2, 4, 7, 9};
+        int moderef[4][4] = {{1, 0, 0, 0},
+          {0, 1, 0, 0},
+          {0, 0, 1, 0},
+          {0, 0, 0, 1},};
+        for (int iAppx = 0; iAppx < 4; ++ iAppx) {
+          for (int iPhi = 0; iPhi < nSample_r; ++iPhi) {
+            // Fill graph data
+            hdat[iPhi] = (meanr[iRef][iType]
+                          + moderef[iAppx][0] * (harmonic_x[iRef][iType][0] * TMath::Cos(1*phidat[iPhi])
+                                                 + harmonic_y[iRef][iType][0] * TMath::Sin(1*phidat[iPhi]))
+                          + moderef[iAppx][1] * (harmonic_x[iRef][iType][1] * TMath::Cos(2*phidat[iPhi])
+                                                 + harmonic_y[iRef][iType][1] * TMath::Sin(2*phidat[iPhi]))
+                          + moderef[iAppx][2] * (harmonic_x[iRef][iType][2] * TMath::Cos(3*phidat[iPhi])
+                                                 + harmonic_y[iRef][iType][2] * TMath::Sin(3*phidat[iPhi]))
+                          + moderef[iAppx][3] * (harmonic_x[iRef][iType][3] * TMath::Cos(4*phidat[iPhi])
+                                                 + harmonic_y[iRef][iType][3] * TMath::Sin(4*phidat[iPhi])) );
+          }// End of loop over azimuth
+           // graph settings
+          graph_harmonicfit[iRef][iType][iAppx] = new TGraph(nSample_r, phidat, hdat);
+          graph_harmonicfit[iRef][iType][iAppx]->SetLineStyle(linestyle[iAppx]);
+          graph_harmonicfit[iRef][iType][iAppx]->SetLineColor(color_sample[color_idx[iAppx]]);
+        }// End of loop over approx
+      }// End of loop over edge algo
       
-      pads2[iType]->cd();
-      full_harmonics[iRef][iType]->Draw("al");
+      //--------------------------------------------------------- Non-composite level plots: Edge-finding
       
-      TLine* flatline = new TLine();
-      flatline->SetLineColor(kGray);
-      flatline->SetLineStyle(7);
-      flatline->DrawLine(-TMath::Pi(), meanr[iRef][iType], TMath::Pi(), meanr[iRef][iType]);
+      // Make graphs for r(phi) display (edgefinding)
+      for (int iType = 0; iType < nEdgeAlgo; ++iType) {
+        graph_r[iRef][iType] = new TGraph(nSample_r, phidat, rdat[iScale][iRef][iType]);
+        graph_r[iRef][iType]->SetLineColor(color_ongray[iType]);
+        
+        double xdat[nSample_r+1];
+        double ydat[nSample_r+1];
+        for (int iPhi = 0; iPhi < nSample_r; ++iPhi) {
+          xdat[iPhi] = rdat[iScale][iRef][iType][iPhi] * TMath::Cos(phidat[iPhi]);
+          ydat[iPhi] = rdat[iScale][iRef][iType][iPhi] * TMath::Sin(phidat[iPhi]);
+        }xdat[nSample_r] = xdat[0]; ydat[nSample_r] = ydat[0];
+        
+        graph_r_onplot[iRef][iType] = new TGraph(nSample_r+1, xdat, ydat);
+        graph_r_onplot[iRef][iType]->SetLineColor(color_ongray[iType]);
+      }
       
-      // Add fourier coefficient histograms
-      hist_coeffcients[iRef][iType]->SetLineColor(color_ongray[iType]);
-      hist_coeffcients[iRef][iType]->SetMarkerColor(color_ongray[iType]);
-      hist_coeffcients[iRef][iType]->SetMarkerStyle(20);
-      hist_coeffcients[iRef][iType]->SetFillColor(color_ongray[iType]);
-      hist_coeffcients[iRef][iType]->SetBarOffset(0.1 + iType*0.4);
-      hist_coeffcients[iRef][iType]->SetBarWidth(0.4);
+      // Plot r(phi) graphs over hists
+      TLegend *leg = new TLegend(0.7, 0.7, 0.9, 0.95);
+      leg->SetLineWidth(0);
+      leg->SetFillColor(kGray);
       
-      drawText(Form("#it{c}_{0} = %.4f", meanr[iRef][iType]), 0.13, 0.95 - !iType*0.2, false, kBlack, 0.05);
-      drawText(Form("#it{c}_{2} = %.4f", hist_coeffcients[iRef][iType]->GetBinContent(2)), 0.13, 0.90 - !iType*0.2, false, kBlack, 0.05);
-      if (!iType) drawText("Edge Extraction: Gradient-Averaging", 0.96, 0.95 - !iType*0.2, true, kBlack, 0.05);
-      else        drawText(Form("Edge Extraction: z-Contour at %.2f", contour_z), 0.96, 0.95 - !iType*0.2, true, kBlack, 0.05);
-    }// End of sketch for loop
-    
-    pads2[2]->cd();
-    hist_coeffcients[iRef][0]->SetMaximum(1.2*getMaxFromHists(hist_coeffcients[iRef][0], hist_coeffcients[iRef][1]));
-    hist_coeffcients[iRef][0]->Draw("b");
-    hist_coeffcients[iRef][1]->Draw("b same");
-    
-    doubleplot->cd();
-    TLatex *title_tex;
-    if (isGeometric) title_tex = drawText(Form("Geometric Scaling (#sqrt{T_{A}T_{B}}), %s", 
-                                               alignstr_formal[iRef]), 0.05, 0.92, false, kBlack, 0.03);
-    else             title_tex = drawText(Form("Arithmetic Scaling (T_{A} + T_{B}), %s", 
-                                               alignstr_formal[iRef]), 0.05, 0.92, false, kBlack, 0.03);
-    if (iRef == 0) {
-      drawText("Full Event Edge Harmonics", 0.05, 0.96);
-      drawText(Form("#it{TGlauberMC} #bf{PbPb}, %i events", nEvent), 0.575, 0.92, false, kBlack, 0.03);
-      drawText(Form("#it{b} #in [%.2f, %.2f]", bmin, bmax), 0.98, 0.95, true, kBlack, 0.03);
-      drawText(Form("Centrality: %i-%i%%",centralitybin_low, centralitybin_high), 0.98, 0.92, true, kBlack, 0.03);
-    }
-    doubleplot->SaveAs(Form("%s/harmonics_%s_centbin%i-%i.pdf", outplot_dir, alignstr[iRef], centralitybin_low, centralitybin_high));
-    title_tex->Clear();
-  }// End of loop over reference hists
+      pads3[0]->cd();
+      refhist_shape[iScale][iRef]->Draw("colz");
+      graph_r_onplot[iRef][1]->SetLineStyle(3);
+      graph_r_onplot[iRef][0]->Draw("l");
+      graph_r_onplot[iRef][1]->Draw("l");
+      graph_r_onplot[iRef][2]->Draw("l");
+      graph_r_onplot[iRef][3]->Draw("l");
+      leg->AddEntry(graph_r_onplot[iRef][0], "Radial Avg", "l");
+      leg->AddEntry(graph_r_onplot[iRef][1], "Gradient Avg", "l");
+      leg->AddEntry(graph_r_onplot[iRef][2], "Gradient Max", "l");
+      leg->AddEntry(graph_r_onplot[iRef][3], Form("Contour z = %.1f",contour_z), "l");
+      leg->Draw();
+      
+      pads3[1]->cd();
+      gradnorm[iScale][iRef]->Draw("colz");
+      graph_r_onplot[iRef][1]->SetLineStyle(1);
+      TMultiGraph* multigraph_polar = new TMultiGraph();
+      multigraph_polar->Add(graph_r_onplot[iRef][1], "l");
+      multigraph_polar->Add(graph_r_onplot[iRef][2], "l");
+      multigraph_polar->Draw();
+      
+      pads3[2]->cd();
+      gradnorm_polar[iScale][iRef]->Draw("colz");
+      TMultiGraph* multigraph_linear = new TMultiGraph();
+      multigraph_linear->Add(graph_r[iRef][1], "l");
+      multigraph_linear->Add(graph_r[iRef][2], "l");
+      multigraph_linear->Draw();
+      //      graph_r[iRef][1]->Draw("l");
+      tripleplot->SaveAs(Form("%s/edgefind_%s_%s_centbin_%i-%i.pdf", outplot_dir, scaling_str[iScale], alignstr[iRef], centralitybin_low, centralitybin_high));
+      
+      //--------------------------------------------------------- Non-composite level plots: Harmonics
+      
+      // Make plot of original graphs alongside approximations
+      for (int iType = 1; iType <= 3; iType+=2) {
+        
+        full_harmonics[iRef][iType] = new TMultiGraph();
+        full_harmonics[iRef][iType]->Add(graph_r[iRef][iType]);
+        //      for (int iAppx = 0; iAppx < 4; ++iAppx) full_harmonics[iRef][iType]->Add(graph_harmonicfit[iRef][iType][iAppx]);
+        full_harmonics[iRef][iType]->Add(graph_harmonicfit[iRef][iType][1]);
+        //        std::cout << "no seg yet" << std::endl;
+        pads2[(iType-1)/2]->cd();
+        full_harmonics[iRef][iType]->Draw("al");
+        
+        TLine* flatline = new TLine();
+        flatline->SetLineColor(kGray);
+        flatline->SetLineStyle(7);
+        flatline->DrawLine(-TMath::Pi(), meanr[iRef][iType], TMath::Pi(), meanr[iRef][iType]);
+        
+        // Add fourier coefficient histograms
+        hist_coeffcients[iRef][iType]->SetLineColor(color_ongray[iType]);
+        hist_coeffcients[iRef][iType]->SetMarkerColor(color_ongray[iType]);
+        hist_coeffcients[iRef][iType]->SetMarkerStyle(20);
+        hist_coeffcients[iRef][iType]->SetFillColor(color_ongray[iType]);
+        hist_coeffcients[iRef][iType]->SetBarOffset(0.1 + iType*0.4);
+        hist_coeffcients[iRef][iType]->SetBarWidth(0.4);
+        
+        drawText(Form("#it{c}_{0} = %.4f", meanr[iRef][iType]), 0.13, 0.95 - !iType*0.2, false, kBlack, 0.05);
+        drawText(Form("#it{c}_{2} = %.4f", hist_coeffcients[iRef][iType]->GetBinContent(2)), 0.13, 0.90 - !iType*0.2, false, kBlack, 0.05);
+        if (iType == 1) drawText("Edge Extraction: Gradient-Averaging", 0.96, 0.95 - !iType*0.2, true, kBlack, 0.05);
+        else            drawText(Form("Edge Extraction: z-Contour at %.2f", contour_z), 0.96, 0.95 - !iType*0.2, true, kBlack, 0.05);
+        
+      }// End of sketch for loop
+      
+      pads2[2]->cd();
+      hist_coeffcients[iRef][0]->SetMaximum(1.2*getMaxFromHists(hist_coeffcients[iRef][0], hist_coeffcients[iRef][1]));
+      hist_coeffcients[iRef][0]->Draw("b");
+      hist_coeffcients[iRef][1]->Draw("b same");
+      
+      doubleplot->cd();
+      TLatex *title_tex;
+      if (!iScale) title_tex = drawText(Form("Geometric Scaling (#sqrt{T_{A}T_{B}}), %s",
+                                             alignstr_formal[iRef]), 0.05, 0.92, false, kBlack, 0.03);
+      else         title_tex = drawText(Form("Arithmetic Scaling (T_{A} + T_{B}), %s",
+                                             alignstr_formal[iRef]), 0.05, 0.92, false, kBlack, 0.03);
+      if (iRef == 0) {
+        drawText("Full Event Edge Harmonics", 0.05, 0.96);
+        drawText(Form("#it{TGlauberMC} #bf{PbPb}, %i events", nEvent), 0.575, 0.92, false, kBlack, 0.03);
+        drawText(Form("#it{b} #in [%.2f, %.2f]", bmin, bmax), 0.98, 0.95, true, kBlack, 0.03);
+        drawText(Form("Centrality: %i-%i%%",centralitybin_low, centralitybin_high), 0.98, 0.92, true, kBlack, 0.03);
+      }
+      doubleplot->SaveAs(Form("%s/harmonics_%s_%s_centbin%i-%i.pdf", outplot_dir, scaling_str[iScale], alignstr[iRef], centralitybin_low, centralitybin_high));
+      title_tex->Clear();
+    }// End of loop over reference hists
+  }//End of loop over scalings
+  std::cout << "Edge extraction complete for all methods. Proceeding to Area calculation..." << std::endl;
+  //--------------------------------------------------------- Finished with Edge Extraction.
   
-  //--------------------------------------------------------- Compute Event-Averaged Area
+  //--------------------------------------------------------- Begin Area calculations
   
-  event_avg_area = 0;
-  double dr = 0.01;
-  double dtheta = 2*TMath::Pi()/nSample_r;
-  double cr;
-  for (int iTheta = 0; iTheta < nSample_r; ++iTheta) {
-    cr = 0;
-    while (cr < rdat[ebe_alignmode][!gradnorm_edge][iTheta]) {
-      event_avg_area += cr * dr * dtheta;
-      cr += dr;
+  std::cout << "A sample calc for each edge will be printed. These can be checked visually against the extracted edge." << std::endl;
+  std::cout << Form("See <%s/edgefind_%s_%s_centbin_%i-%i.pdf>", outplot_dir, scaling_str[1], alignstr[2], centralitybin_low, centralitybin_high) << std::endl;
+  // Loop and compute radial avg distance for each input hists
+  for (int iAreaMethod = 0; iAreaMethod < nmethod_area; ++iAreaMethod) {
+    // Print some information about the current area calculation
+    switch (iAreaMethod) {
+      case 4:
+        std::cout << "Currently calculating area for method: netcovar" << std::endl;
+        std::cout << "This calculation should be fast." << std::endl;
+        break;
+      case 5:
+        std::cout << "Currently calculating area for method: ebecovar" << std::endl;
+        std::cout << "This calculation is very slow, due to energy rescaling and area calculation in each event." << std::endl;
+        std::cout << "Information about the calculation will be printed as it proceeds." << std::endl;
+        break;
+      default:
+        std::cout << Form("Currently calculating area for method: %s", edgealgo_str[iAreaMethod]) << std::endl;
+        std::cout << "This calculation should be fast." << std::endl;
     }
-  }
+    
+    // Loop over the possible energy scalings, averaging strategies
+    if (iAreaMethod < 5) {
+      for (int iScale = 0; iScale < 2; ++iScale) {
+        for (int iRef = 0; iRef < 3; ++iRef) {
+          //--------------------------------------------------------- Compute Event-Averaged Area
+          double event_avg_area = 0;
+          if (iAreaMethod == 4) { // Net statwidth area
+            event_avg_area = varianceArea(refhist_shape[iScale][iRef]);
+          } else { // Area from edge results
+            double dr = 0.01;
+            double cr;
+            double dtheta = 2*TMath::Pi()/nSample_r;
+            for (int iTheta = 0; iTheta < nSample_r; ++iTheta) {
+              cr = 0;
+              while (cr < rdat[iScale][iRef][iAreaMethod][iTheta]) {
+                event_avg_area += cr * dr * dtheta;
+                cr += dr;
+                if (cr > 1e6) {std::cout << "possibly stuck in while with rdat = " << rdat[iScale][iRef][iAreaMethod][iTheta] << std::endl; break;}
+              }
+            }
+          }
+          
+          switch (3*iScale + iRef) {
+            case 0: // Arithmetic, no align
+              event_avg_area_arit_noalign[iAreaMethod] = event_avg_area;
+              break;
+            case 1: // Arithmetic, cm align
+              event_avg_area_arit_cmalign[iAreaMethod] = event_avg_area;
+              break;
+            case 2: // Arithmetic, cm and psi2 align
+              event_avg_area_arit_flalign[iAreaMethod] = event_avg_area;
+              std::cout << "Sample calc (Arit scaling, full align): " << event_avg_area << std::endl;
+              break;
+            case 3: // Geometric, no align
+              event_avg_area_geom_noalign[iAreaMethod] = event_avg_area;
+              break;
+            case 4: // Geometric, cm align
+              event_avg_area_geom_cmalign[iAreaMethod] = event_avg_area;
+              break;
+            case 5: // Geometric, cm and psi2 align
+              event_avg_area_geom_flalign[iAreaMethod] = event_avg_area;
+              std::cout << "Sample calc (Geom scaling, full align): " << event_avg_area << std::endl << std::endl;
+              break;
+          }
+        }// End of loop over reference hists
+      }//End of loop over scalings
+    } else if (iAreaMethod == 5) { // EBE statwidth area
+      TFile* cEBE_file = new TFile(Form("../data.nosync/%s_%.2fTeV/glauber/glauber_withgrid_%s.root", species, sqrt_s, refstring));
+      
+      int nevent_cfile = cEBE_file->Get<TTree>("lemon")->GetBranch("npart")->GetEntries();
+      double csum[6] = {0, 0, 0, 0, 0, 0};
+      // Note that the first event (inited_event0) is skipped.
+      // For some reason, including it throws strange memory errors and produces nonphysical areas.
+      // To view this, change to "iEvent = 1." The nonphysical hists will be printed to the local desktop.
+      // Excluding this event resolves the issue. I'm not sure why this happens.
+      // The loss of the single event is included in the renormalization, so effectively there are n-1 events.
+      for (int iEvent = 2; iEvent <= nevent_cfile; ++iEvent) {
+        global_event = iEvent;
+        TH2D* chist_e = cEBE_file->Get<TH2D>(Form("inited_event%i", iEvent-1));
+        
+        // Arithmetic scaling, no alignment, reaction plane
+        csum[0] += varianceArea(chist_e);
+        
+        // Arithmetic scaling, CM alignment, reaction plane
+        chist_e = translateHist_simple(chist_e, 0, 0, true);
+        csum[1] += varianceArea(chist_e);
+        
+        // Arithmetic scaling, CM alignment, rotate to participant plane
+        chist_e = rotateHist2D_simple(chist_e, TMath::Pi()/4 - getParticipantPlaneAngle(chist_e), true);
+        csum[2] += varianceArea(chist_e);
+        
+        // Adjust to Geometric scaling
+        chist_e = geometricEnergyDensity(cEBE_file->Get<TH2D>(Form("initA_event%i", iEvent-1)),
+                                         cEBE_file->Get<TH2D>(Form("initB_event%i", iEvent-1)));
+        
+        // Geometric scaling, no alignment, reaction plane
+        csum[3] += varianceArea(chist_e);
+        
+        // Geometric scaling, CM alignment, reaction plane
+        chist_e = translateHist_simple(chist_e, 0, 0, true);
+        csum[4] += varianceArea(chist_e);
+        
+        // Geometric scaling, CM alignment, rotate to participant plane
+        chist_e = rotateHist2D_simple(chist_e, TMath::Pi()/4 - getParticipantPlaneAngle(chist_e), true);
+        csum[5] += varianceArea(chist_e);
+        
+        if (iEvent % 1000 == 0) std::cout << "Finished with EBE stat area in event #" << iEvent << std::endl;
+      }// End of loop over events
+      
+      event_avg_area_arit_noalign[iAreaMethod] = csum[0] / (double)(nevent_cfile-1);
+      event_avg_area_arit_cmalign[iAreaMethod] = csum[1] / (double)(nevent_cfile-1);
+      event_avg_area_arit_flalign[iAreaMethod] = csum[2] / (double)(nevent_cfile-1);
+      event_avg_area_geom_noalign[iAreaMethod] = csum[3] / (double)(nevent_cfile-1);
+      event_avg_area_geom_cmalign[iAreaMethod] = csum[4] / (double)(nevent_cfile-1);
+      event_avg_area_geom_flalign[iAreaMethod] = csum[5] / (double)(nevent_cfile-1);
+      
+      std::cout << "Sample calc (Arit scaling, full align): " << event_avg_area_arit_flalign[iAreaMethod] << std::endl;
+      std::cout << "Sample calc (Geom scaling, full align): " << event_avg_area_geom_flalign[iAreaMethod] << std::endl << std::endl;
+      
+      cEBE_file->Close();
+      delete cEBE_file;
+    }
+  }// End of loop over area computation methods
+  
     
   // Write to tree
+  datfile->cd();
   botcentbin_local = centralitybin_low;
   topcentbin_local = centralitybin_high;
   eventshape_tree->Fill();
   eventshape_tree->Write("eventshape_tree", TObject::kOverwrite);
-
-//
-//  TF1* modes[5];
-//  double ca, cb;
-//  pads[0]->cd();
-//  pads[0]->Clear();
-//  modes[0]->Draw();
-//  for (TF1* mode:modes) mode->Draw("same");
-//  pads[1]->Clear();
-//  pads[2]->Clear();
-//  canvas->SaveAs("outplot_eventshape/harmonic_test.pdf");
-//
-//
-//  // Overall event generation statistics summary
-//
-//  pads[0]->cd();
-//  nPartHist->Draw("hist");
-//  pads[1]->cd();
-//  nCollHist->Draw("hist");
-//  pads[2]->cd();
-//  bHist->Draw("hist");
-//  canvas->SaveAs("outplot_eventshape/event_hist_test.pdf");
-  
   
   return;
 }
+
+// Run eventshape all centrality classes

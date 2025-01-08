@@ -2,10 +2,11 @@
 
 //------------------------------------------------ Kinematic Settings
 
-const char experiment[10] = "ALICE";      // Experiment string
-const char speciesA[3] = "Pb";            // Projectile Nucleus (Smaller nucleus if applicable)
-const char speciesB[3] = "Pb";            // Target Nucleus (Larger nucleus if applicable)
-const double sqrt_s = 2.76;               // sqrt{s} CM energy, in TeV
+const char experiment[10] = "STAR";       // Experiment string
+const char speciesA[3] = "Au";            // Projectile Nucleus (Smaller nucleus if applicable)
+const char speciesB[3] = "Au";            // Target Nucleus (Larger nucleus if applicable)
+const double sqrt_s = 0.20;               // sqrt{s} CM energy, in TeV
+const int dataset = 2013;                 // Two currently implemented datasets: 2013 (2.76 TeV), 2018 (2.76, 5.02 TeV)
 
 //------------------------------------------------ Glauber Settings
 
@@ -18,8 +19,8 @@ const bool useTabulatedCentrality = true;
 
 
 // Modify these two settings to control centrality throughout the package!
-const int centralitybin_low = 70;          // Lower edge of centrality bin on current run
-const int centralitybin_high = 80;         // Upper edge of centrality bin on current run
+int centralitybin_low = 70;          // Lower edge of centrality bin on current run
+int centralitybin_high = 80;         // Upper edge of centrality bin on current run
 
 // Number of bins in each axis of nuclear thickness histogram.
 // Heavily affects computation speed at all levels of Glauber modeling.
@@ -46,16 +47,24 @@ const bool data_errors_sumbyquadrature = false;
 
 // List of centrality bins corresponding to histograms unpacked from HEP data
 // Must be set manually, since this differs between data sets.
-const int centrality_list[15][2] = {
+
+// For 2018 dataset
+const int centrality_list[9][2] = {
   { 0,  5}, { 5, 10}, {10, 20}, {20, 30}, {30, 40},
-  {40, 50}, {50, 60}, {60, 70}, {70, 80}, { 0, 10},
-  { 0, 20}, {20, 40}, {40, 60}, {40, 80}, {60, 80}
+  {40, 50}, {50, 60}, {60, 70}, {70, 80}
 };
 
+// For 2013 reference
+//const int centrality_list[15][2] = {
+//  { 0,  5}, { 5, 10}, {10, 20}, {20, 30}, {30, 40},
+//  {40, 50}, {50, 60}, {60, 70}, {70, 80}, { 0, 10},
+//  { 0, 20}, {20, 40}, {40, 60}, {40, 80}, {60, 80}
+//};
+
 const int index_raa_in_file = 16;                   // The first plot index Hist1D_y1_N with an R_AA plot
-const double minpt_comparison_threshold = 15;        // Lower bound pT for chi2 comparisons, in GeV
-const double dpT_resolution = 0.005;                  // Step size for pT shift in energyloss calculation
-const double max_dpt = 5;                          // Max pT shift to scan, in GeV
+const double minpt_comparison_threshold = 8;        // Lower bound pT for chi2 comparisons, in GeV
+const double dpT_resolution = 0.005;                // Step size for pT shift in energyloss calculation
+const double max_dpt = 5;                           // Max pT shift to scan, in GeV
 
 //------------------------------------------------ Event Shape Settings
 
@@ -66,6 +75,14 @@ const double max_dpt = 5;                          // Max pT shift to scan, in G
 const int ebe_alignmode = 2;            // Switch for alignment setting on area calculation
 
 const bool isGeometric = true;          // Toggle for Geometric vs. Arithmetic Energy Density scaling
-const bool gradnorm_edge = true;        // Toggle for gradient-norm versus z-contour edge extraction
-const double contour_z = 0.5;           // Fraction of max at which to take z-contour
+// Algorithm for Glauber edge extraction
+// Currently implemented methods:
+//    - radial_mean           (Average radius of energy density distrubution)
+//    - gradnorm_mean         (Average radius of energy gradient, i.e. pressure distribution)
+//    - gradnorm_max          (Maximal pressure surface (radial contour of largest local descent)
+//    - z_contour             (Contour at constant z value, tunable. Half-max is default.)
+const char eventshape_edgefind_method[20] = "gradnorm_max";
+const int nsample_maxregion = 5;        // Number of samples with which to take the average for the max. For large nsample, max reproduces the average.
+const double contour_z = 0.5;           // Fraction of max at which to take z-contour. Half max is possibly best motivated.
+const bool use_statwidth_area = true;   // Uses statistical definition of area based on covariances rather than from extracted edge
 

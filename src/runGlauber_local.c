@@ -26,6 +26,7 @@ void runGlauber_local(int nEvent,
   char species[5];
   snprintf(species, 5, "%s%s", speciesA, speciesB);
   
+  std::cout << "Running at energy sqrt{s} = " << sqrt_s << " TeV" << std::endl;
   // If b_low and b_high are -1 (i.e. default flag) use config-set centrality
   if (b_low == -1 && b_high == -1) {
     if (useTabulatedCentrality) {

@@ -14,7 +14,7 @@ double getNucleonCrossSection(double sqrts_local) {
   return 29.8 + 0.038 * TMath::Power(TMath::Log(sqrts_local), 2.43);
 }
 
-int nucleusLookup(char* species) {
+int nucleusLookup(const char* species) {
   TString species_t = species;
   // Test for most common types first
   if      (species_t == "Au")   return 197;
@@ -42,7 +42,7 @@ int nucleusLookup(char* species) {
 }
 
 // Return the total number of nucleons for a given collision system.
-int getMaxNucleons(char* speciesA, char* speciesB) {
+int getMaxNucleons(const char* speciesA, const char* speciesB) {
   return nucleusLookup(speciesA) % 1000 + nucleusLookup(speciesB) % 1000;
 }
 
@@ -50,7 +50,7 @@ int getMaxNucleons(char* speciesA, char* speciesB) {
 // Values reproduced from Ref. arXiv:1710.07098v3:
 // https://doi.org/10.48550/arXiv.1710.07098
 // A little clunky with array handling due to pointer/array troubles. Look into later if time allows.
-double getImpactParameterFromCentralityClass(int centrality, double sqrts_local, char* speciesA, char* speciesB) {
+double getImpactParameterFromCentralityClass(int centrality, double sqrts_local, const char* speciesA, const char* speciesB) {
   if (centrality % 5 != 0)
     std::cout << "Warning in glauber_tools::getImpactParameterFromCentralityClass: " <<
     "Impact parameter at energy sqrt{s_NN} = " << sqrts_local <<
@@ -183,7 +183,7 @@ double getImpactParameterFromCentralityClass(int centrality, double sqrts_local,
   if (lookupFlag) return centralityData[centrality/5];
   std::cout << "Error in glauber_tools::getImpactParameterFromCentralityClass: " <<
     "System " << speciesA << speciesB << " not found in lookup at sqrt{s} = " <<
-    sqrt_s << "." << std::endl;
+    sqrts_local << "." << std::endl;
   return 0;
 }
 
