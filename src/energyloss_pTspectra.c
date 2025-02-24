@@ -1,495 +1,272 @@
-// ROOT macro. Generates energyloss estimate by shifting reference pT spectrum and taking a ratio with original spectrum
-// This estimate for energy loss is obtained by fitting this ratio against a known reference R_AA
-// Assumes relevant data spectra have been correctly formatted and are accessible in ../data.nosync
+// ROOT macro. Generates pseudo-R_AA plot by shifting jet pT spectrum and taking a ratio with original spectrum
+// Attempts to find mean energy loss by fitting the pseudo-R_AA with a reference R_AA
+// Assumes relevant file with input cuts has already been generated
+// See ../eventgen/PYTHIA/eventgen_jets.cc for details on output data format
 
-#include "../config.h"
 #include "../utils/root_draw_tools.h"
 #include "../utils/hist_tools.h"
+#include "../config.h"
+
+// TODO lead pT store in TTree....
 
 
-
-
+// Color and aesthetic settings for root plots
+Int_t palette_full = kCherry;
+Int_t palette_ch = kLake;
+Int_t markerStyle_full = 20;
+Int_t markerStyle_ch = 33;
+Float_t markerSize_full = 0.75;
+Float_t markerSize_ch = 1.0;
 
 void energyloss_pTspectra() {
-  const int n_dpt = (int) max_dpt / dpT_resolution;
-  const int n_raa = sizeof(centrality_list) / sizeof(int[2]);
-//  const int n_raa = 1;
-  char species[5];
-  snprintf(species, 5, "%s%s", speciesA, speciesB);
-  const char string_truefalse[2][10] = {"true","false"};
+  char system[10];
+  snprintf(system, 10, "%s%s", speciesA, speciesB);
+  char data_directory[100];
+  snprintf(data_directory, 100, "../data.nosync/%s_%.2fTeV", system, sqrt_s);
+  char outplot_directory[100];
+  snprintf(outplot_directory, 100, "../plots/%s_%.2fTeV/%s", system, sqrt_s, experiment);
   
-  TFile* infile_raa = new TFile(Form("../data.nosync/%s_%.2fTeV/spectra/%s_%s%.2fTeV_unpacked_%i.root",
-                                species, sqrt_s, experiment, species, sqrt_s, dataset));
-  TFile* infile_ref = new TFile(Form("../data.nosync/pp_reference_%i.root", dataset));
-  
-  // Set up data according to inputs
-  
-  // 2018 dataset.
-  //    - 2.76 TeV: 1, 7
-  //    - 5.02 TeV: 2, 8
-  int pt_table;
-  int raa_table;
-  // For 2013 reference:
-  //    - Hist1D_y2_1 is 2.76 TeV
-  // For 2018 reference:
-  //    - Hist1D_y1_4 is 5.02 TeV
-  //    - Hist1D_y2_4 is 2.76 TeV
-  TH1F *pp_reference;
-  if (dataset == 2013) {
-    pp_reference = infile_ref->Get<TH1F>("Hist1D_y2_1");
-    pp_reference->SetTitle(";p_{T} [GeV];1/2#pip_{T} d^{2}#sigma/d#etadp_{T} [mb/GeV^{2}]");
-    std::cout << "debug" << std::endl;
-  } else if (dataset == 2018) {
-    if (sqrt_s == 2.76) {
-      pp_reference = infile_ref->Get<TH1F>("Hist1D_y2_4");
-      pt_table = 1;
-      raa_table = 7;
-    } else if (sqrt_s == 5.02) {
-      pp_reference = infile_ref->Get<TH1F>("Hist1D_y1_4");
-      pt_table = 2;
-      raa_table = 8;
-    } else {
-      std::cout << "Error in <src/energyloss_pTspectra>: Requested CM energy sqrt_s = " <<
-        sqrt_s << " is not available in 2018 dataset." << std::endl;
-      return;
-    }pp_reference->SetTitle(";p_{T} [GeV];1/N^{evt} d^{2}N/D#eta/dp_{T} [C/GeV]");
-  } else {
-    std::cout<<Form("Error in <src/energyloss_pTspectra>: No data available for %i.",dataset)<<std::endl;
-    return;
-  }pp_reference->SetLineColor(kBlack);
+  char chargestring[2][10] = {"full","char"};
   
   
   
   
-  TH1F* data_pt[n_raa];
-  TH1F* data_raa[n_raa];
-  TH1F* data_totalunc[n_raa];
-  for (int i = 0; i < n_raa; ++i) {
-    if (dataset == 2013) {
-      data_pt[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_%i",i+1)));
-      data_raa[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_%i",i+index_raa_in_file)));
-    } else if (dataset == 2018) {
-      data_pt[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_%i",i+1, pt_table)));
-      data_raa[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_%i",i+1, raa_table)));
+  // TCanvas Setup
+  gStyle->SetOptStat(0);
+  TCanvas* canvas_check = new TCanvas();
+  canvas_check->SetCanvasSize(350,500);
+  
+  //---------------------------------------------------------- Find data R_AA spectra
+  
+  TFile* data_reference_file = new TFile(Form("%s/%s_%.2fTeV_data.root", data_directory, experiment, sqrt_s));
+  
+  // Which spectra to get from the data?
+  const float data_lowestpT = 25;
+  const int ndata_centbin = 2;
+  char raa_centbin[ndata_centbin][10] = {"0-10","10-30"};
+  TH1F* hist_raa_datreference[ndata_centbin];
+  TH1F* hist_shifting[ndata_centbin];
+  TH1F* ratio_shifting[ndata_centbin];
+  TH1F* hist_baseline[ndata_centbin];
+  int color_centbin[2] = {kBlue+1, kRed+1};
+  for (int i_cent = 0; i_cent < ndata_centbin; ++i_cent) {
+    hist_raa_datreference[i_cent] = data_reference_file->Get<TH1F>(Form("%s_%.2fTeV_RAA_cent%s",experiment, sqrt_s, raa_centbin[i_cent]));
+    hist_raa_datreference[i_cent]->SetLineColor(color_centbin[i_cent]);
+    
+    // To later shift spectra into this histogram with the same binning as reference
+    hist_shifting[i_cent] = static_cast<TH1F*>(hist_raa_datreference[i_cent]->Clone());
+    hist_shifting[i_cent]->Reset();
+    ratio_shifting[i_cent] = static_cast<TH1F*>(hist_raa_datreference[i_cent]->Clone());
+    ratio_shifting[i_cent]->Reset();
+    
+    // For taking ratio against pp with same binning
+    hist_baseline[i_cent] = static_cast<TH1F*>(hist_raa_datreference[i_cent]->Clone());
+    hist_baseline[i_cent]->SetLineColor(color_centbin[i_cent]+2);
+    hist_baseline[i_cent]->Reset();
+  }
+  
+  
+  // Plot to check we have the right data
+  hist_raa_datreference[0]->GetYaxis()->SetRangeUser(0, 1);
+  hist_raa_datreference[0]->GetXaxis()->SetRangeUser(20, 120);
+  hist_raa_datreference[0]->Draw("hist");
+  hist_raa_datreference[1]->Draw("hist same");
+  canvas_check->SaveAs(Form("%s/checks/RAA_check.pdf",outplot_directory));
+  
+  
+  //---------------------------------------------------------- Extract pythia simulated jets with final cuts
+  
+  TFile* pythia_file = new TFile(Form("%s/pythpp_%.2fTeV_r%.1fjet.root", data_directory, sqrt_s, jet_radius));
+  
+  // Get the output spectrum from the compiled file to make sure the tree-weighted one looks the same
+  TH1D* pythia_spectra_uncut_reference = pythia_file->Get<TH1D>(Form("hist_pT_%sjet",chargestring[flag_use_charged_jets]));
+  
+  TH1D* pythia_spectra_uncut_check = static_cast<TH1D*>(pythia_spectra_uncut_reference->Clone());
+  
+  pythia_spectra_uncut_check->Reset();
+  
+  
+  // Reader of tree variables
+  TTreeReader* reader = new TTreeReader("pythia_tree", pythia_file);
+  TTreeReaderValue<float>                 jetweight(*reader, "binweight");    // Weight of this jet due to pTHard binning
+  TTreeReaderValue<int>                   mult(*reader, "ntotal");            // Total event track multiplicity
+  TTreeReaderValue<int>                   njet(*reader, "njet");              // Number of full jets in an event
+  TTreeReaderValue<std::vector<int>>      jet_mult(*reader, "jet_n");         // Array of full jet constituent multiplicties
+  TTreeReaderValue<std::vector<float>>    jet_pT(*reader, "jet_pT");          // Array of full jet p_T
+  TTreeReaderValue<std::vector<float>>    jet_y(*reader, "jet_y");            // Array of full jet rapidity
+  TTreeReaderValue<std::vector<float>>    jet_eta(*reader, "jet_eta");        // Array of full jet pseudorapidity
+  TTreeReaderValue<std::vector<float>>    jet_phi(*reader, "jet_phi");        // Array of full jet azimuth
+  TTreeReaderValue<std::vector<float>>    jet_area(*reader, "jet_area");      // Array of full jet area
+  TTreeReaderValue<int>                   cmult(*reader, "ncharge");          // Event charged track multiplicity
+  TTreeReaderValue<int>                   ncjet(*reader, "nchjet");           // Number of charged jets in an event
+  TTreeReaderValue<std::vector<int>>      cjet_mult(*reader, "chjet_n");      // Array of charged jet constituent multiplicties
+  TTreeReaderValue<std::vector<float>>    cjet_pT(*reader, "chjet_pT");       // Array of charged jet p_T
+  TTreeReaderValue<std::vector<float>>    cjet_y(*reader, "chjet_y");         // Array of charged jet rapidity
+  TTreeReaderValue<std::vector<float>>    cjet_eta(*reader, "chjet_eta");     // Array of charged jet pseudorapidity
+  TTreeReaderValue<std::vector<float>>    cjet_phi(*reader, "chjet_phi");     // Array of charged jet azimuth
+  TTreeReaderValue<std::vector<float>>    cjet_area(*reader, "chjet_area");   // Array of charged jet area
+  
+  
+  // Print some information about the final cuts to be used (should match the R_AA dataset of choice)
+  std::cout << "----------------------------------------------------------------------------" << std::endl;
+  std::cout << "Beginning energy loss fitting with the following final event cuts:" << std::endl;
+  std::cout << Form("PYTHIA pp sqrt_s_NN = %.2f TeV, pT_hadron >= %.2f GeV, |eta_hadron| < %.2f",
+                    sqrt_s, pTmin_hadron, max_eta) << std::endl;
+  std::cout << Form("FastJet3 R = %.1f %s Jets, |eta_jet| < %.2f, jet_A >= %.2f*pi*R^2",
+                    jet_radius,algo_string,max_eta - jet_radius,min_area/(3.141592*jet_radius*jet_radius)) << std::endl;
+  std::cout << Form("pT_jet >= %.2f, pT_charged_jet >= %.2f, pT_leading >= %.2f",
+                    jetcut_minpT_full,jetcut_minpT_chrg, pTmin_jetcore) << std::endl;
+  std::cout << "----------------------------------------------------------------------------" << std::endl;
+  
+  
+  // Gather jet data and perform the cuts
+  std::vector<float> pT_unbinned;
+  std::vector<float> weight_unbinned;
+  if (!flag_use_charged_jets) { // Use full jets
+    while (reader->Next()) for (int i = 0; i < jet_pT->size(); ++i) {
+      pythia_spectra_uncut_check->Fill(jet_pT->at(i), *jetweight);
+      
+      if (jet_eta->at(i) > max_eta - jet_radius) continue;
+      if (jet_area->at(i) < min_area) continue;
+      if (jet_pT->at(i) < jetcut_minpT_full || jet_pT->at(i) < data_lowestpT) continue;
+      // Will have jet core cut here...
+      
+      // Fill each ref hist separately since the binning of each dataset may be different...
+      for (int i_cent = 0; i_cent < ndata_centbin; ++i_cent)
+        hist_baseline[i_cent]->Fill(jet_pT->at(i), *jetweight);
+      pT_unbinned.push_back(jet_pT->at(i));
+      weight_unbinned.push_back(*jetweight);
     }
-
-    
-    data_raa[i]->SetTitle(";p_{T} [GeV];R_{AA}");
-    
-    if (data_errors_sumbyquadrature) {
-      //loop, compute by quadrature
-    } else {
-      if (dataset == 2013) {
-        data_totalunc[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e1_%i",i+index_raa_in_file)));
-        data_totalunc[i]->Add(data_totalunc[i],
-                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e2_%i",i+index_raa_in_file))));
-        data_totalunc[i]->Add(data_totalunc[i],
-                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y1_e3_%i",i+index_raa_in_file))));
-      } else if (dataset == 2018) {
-        data_totalunc[i] = static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_e1_%i",i+1, raa_table)));
-        data_totalunc[i]->Add(data_totalunc[i],
-                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_e2_%i",i+1, raa_table))));
-        data_totalunc[i]->Add(data_totalunc[i],
-                              static_cast<TH1F*>(infile_raa->Get(Form("Hist1D_y%i_e3_%i",i+1, raa_table))));
+  } else { // Use charged jets
+    while (reader->Next()) {
+      for (int i = 0; i < cjet_pT->size(); ++i) {
+        pythia_spectra_uncut_check->Fill(cjet_pT->at(i), *jetweight);
+        
+        if (cjet_eta->at(i) > max_eta - jet_radius) continue;
+        if (cjet_area->at(i) < min_area) continue;
+        if (cjet_pT->at(i) < jetcut_minpT_chrg) continue;
+        // Will have jet core cut here...
+        
+        // Fill each ref hist separately since the binning of each dataset may be different...
+        for (int i_cent = 0; i_cent < ndata_centbin; ++i_cent)
+          hist_baseline[i_cent]->Fill(cjet_pT->at(i), *jetweight);
+        pT_unbinned.push_back(cjet_pT->at(i));
+        weight_unbinned.push_back(*jetweight);
       }
     }
   }
   
+  //Spectra are already normalized, except by bin width
+  pythia_spectra_uncut_check->Scale(1, "width");
+  for (int i_cent = 0; i_cent < ndata_centbin; ++i_cent)
+    hist_baseline[i_cent]->Scale(1, "width");
   
   
-  // Open output file or create it if it doesn't exist.
-  // Create TTree for energyloss data
-  double energyloss;
-  double botcentbin_local;
-  double topcentbin_local;
-  TFile* datfile = new TFile(Form("../data.nosync/%s_%.2fTeV/eventshape_energyloss.root", species, sqrt_s), "update");
-  TTree* energyloss_tree = new TTree("tempname", "energyloss_tree");
-  energyloss_tree->Branch("centralitybin_low", &botcentbin_local);
-  energyloss_tree->Branch("centralitybin_high", &topcentbin_local);
-  energyloss_tree->Branch("energyloss", &energyloss);
-  // TODO branch other energyloss estimates
-  
-  // Canvas setup
-  TCanvas *canvas = new TCanvas();
-//  canvas->SetCanvasSize(1000, 1000);
-  canvas->SetWindowSize(1200, 1600);
-  
-  TPad* mainpad = buildPad("mainpad", 0.07, 0, 1, 0.9, 0, 0, 0, 0);
-  mainpad->Divide(4,3);
-  gStyle->SetOptStat(0);
+  std::cout << "Cuts completed. Printing check against reference spectra..." << std::endl;
+  gPad->SetLogy();
+  pythia_spectra_uncut_reference->Draw("hist");
+  pythia_spectra_uncut_check->SetLineColorAlpha(kRed, 0.5);
+  pythia_spectra_uncut_check->SetLineStyle(7);
+  pythia_spectra_uncut_check->SetLineWidth(2);
+  pythia_spectra_uncut_check->Draw("hist same");
+  for (int i_cent = 0; i_cent < ndata_centbin; ++i_cent)
+    hist_baseline[i_cent]->Draw("hist same");
+  canvas_check->SaveAs(Form("%s/checks/check_spectra.pdf",outplot_directory));
   
   
+  std::cout << "pT_unbinned size = " << pT_unbinned.size() << ", weight_unbinned.size() = " << weight_unbinned.size() << std::endl;
   
-  // Energyloss computation
-  const double dpt = -dpT_resolution;
-  const int nbin = pp_reference->GetXaxis()->GetNbins();
-  double cval;
-  double cmin_dpt[3];
-  TH1F *opt_raa_hist[3];
-  TH1F *opt_pt_hist[3];
- 
-  int ntest = 0;
-  for (int iCent = ntest; iCent < ntest+1; ++iCent) {
-    // Setup hists for optimizer storage
-    TH1F* chi2_hist = new TH1F("",";#Delta p_{T};#chi^{2}",n_dpt, 0, n_dpt*(-dpt));
-    TH1F* ks_r_hist = new TH1F("",";#Delta p_{T};KS",      n_dpt, 0, n_dpt*(-dpt));
-    TH1F* ks_n_hist = new TH1F("",";#Delta p_{T};KS",      n_dpt, 0, n_dpt*(-dpt));
+  //---------------------------------------------------------- Perform subtraction
+  
+  const int ntotal_jets = pT_unbinned.size();
+  
+  float delta_pT = 0.01; // Energy loss resolution
+  float max_delta_pT = 18;
+  const int ntotal_scan = (int)(max_delta_pT/delta_pT);
+  TH1F* chi2_hist[ndata_centbin];
+  float fitmetric_best[ndata_centbin];
+  float pT_shift_best[ndata_centbin];
+  
+  for (int i_cent = 0; i_cent < ndata_centbin; ++i_cent) {
+    fitmetric_best[i_cent] = 1e20; // large value initially
     
-    double cmin_chi2 = 1e50;
-    double cmin_ks_r = 1;
-    double cmin_ks_n = 1;
+    std::cout << "Beginning shift finder for centbin" << raa_centbin[i_cent] << "%" << std::endl;
     
-    //--------------------------------------------------------------Perform fitting
+    chi2_hist[i_cent] = new TH1F(Form("Fit_hist_cent%s",raa_centbin[i_cent]),
+                                      ";#Delta p_{T};MSE", ntotal_scan, delta_pT, max_delta_pT);
     
-    TH1F* placeholder_hist;
-    TH1F* placeholder_ratio = static_cast<TH1F*>(pp_reference->Clone());
-    for (int ipt = 1; ipt <= n_dpt; ++ipt) {
-      placeholder_ratio->Reset();
+    
+    // To start, a simple scan over the delta pT space
+    // (should replace with a faster method later...)
+    for (int i_delta = 1; i_delta < ntotal_scan; ++i_delta) {
       
+      // Perform the shift using unbinned jet data
+      hist_shifting[i_cent]->Reset();
+      for (int i_jet = 0; i_jet < ntotal_jets; ++i_jet)
+        hist_shifting[i_cent]->Fill(pT_unbinned.at(i_jet) - i_delta*delta_pT, weight_unbinned.at(i_jet));
+      hist_shifting[i_cent]->Scale(1, "width");
       
-      
-      //------------------------------------------------------------Rebinning/Ratio
-      
-      // shift placeholder by dpt, rebin.
-      // Take ratio against reference to compute phenom R_AA
-      placeholder_hist = static_cast<TH1F*>(translateHist(pp_reference, dpt*ipt, 0, 0, 12));
-      for (int ibin = 1; ibin <= nbin; ++ibin) {
-        cval = placeholder_hist->GetBinContent(ibin);
-        if (cval == 0) {placeholder_ratio->SetBinContent(ibin, 0); continue;}
-        placeholder_ratio->SetBinContent(ibin, cval / pp_reference->GetBinContent(ibin));
-      }
-      
-      //------------------------------------------------------------Chi^2 calculation
-      
-      // Compute chi^2 against data R_AA
-      double cpt;
-      double chi2 = 0;
-      for (int ibin = 1; ibin <= data_raa[iCent]->GetXaxis()->GetNbins(); ++ibin) {
-        cpt = data_raa[iCent]->GetXaxis()->GetBinCenter(ibin);
-        if (cpt < minpt_comparison_threshold) continue;
-        chi2 += TMath::Power(placeholder_ratio->GetBinContent(placeholder_ratio->FindBin(cpt))
-                             - data_raa[iCent]->GetBinContent(ibin), 2)
-                             / data_totalunc[iCent]->GetBinContent(ibin);
-      }chi2_hist->SetBinContent(ipt, chi2);
-      
-      if (chi2 < cmin_chi2) {
-        cmin_chi2 = chi2;
-        cmin_dpt[0] = -dpt*ipt;
-        opt_pt_hist[0] = static_cast<TH1F*>(placeholder_hist->Clone());
-        opt_raa_hist[0] = static_cast<TH1F*>(placeholder_ratio->Clone());
-      }
-      
-      //------------------------------------------------------------KS calculation (rebinned)
-
-      
-      //new, with pT
-      double ks_r = KS_statistic_new(placeholder_hist, data_pt[iCent], 0, minpt_comparison_threshold, INT_MAX,
-                                     false, Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
-                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
-                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      // new, with raa
-//      double ks_r = KS_statistic_new(placeholder_ratio, data_raa[iCent], 0, minpt_comparison_threshold, INT_MAX,
-//                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      //old, with pt, rebin
-//      double ks_r = KS_statistic(placeholder_hist, data_pt[iCent], 0, minpt_comparison_threshold, true,
-//                                 false, Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
-//                                             centrality_list[iCent][0],centrality_list[iCent][1],
-//                                             centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      //old, with raa, rebin
-//      double ks_r = KS_statistic(placeholder_ratio, data_raa[iCent], 0, minpt_comparison_threshold, true,
-//                                 false, Form("../tmp/tmpplot/cent_%i-%i%%/rebin/ks_r_Cent%i-%i%%_i%i",
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      
-//      TH1* hist1,
-//      TH1* hist2,
-//      double horizontal_shift = 0,
-//      double thresh_min = INT_MIN,
-//      double thresh_max = INT_MAX,
-//      bool doPlot = false,
-//      const char *saveName = (char*)"ks",
-//      int iteration = -1
-      
-      ks_r_hist->SetBinContent(ipt, ks_r);
-      if (ks_r < cmin_ks_r) {
-        cmin_ks_r = ks_r;
-        cmin_dpt[1] = -dpt*ipt;
-        opt_pt_hist[1] = static_cast<TH1F*>(placeholder_hist->Clone());
-        opt_raa_hist[1] = static_cast<TH1F*>(placeholder_ratio->Clone());
-      }
-      
-      //------------------------------------------------------------KS calculation (no rebin)
-      
-      //old, with pt, up
-//      double ks_n = KS_statistic(data_pt[iCent], pp_reference, -dpt*ipt, minpt_comparison_threshold-dpt*ipt, true,
-//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      //old, with pt, down
-//      double ks_n = KS_statistic(pp_reference, data_pt[iCent], dpt*ipt, minpt_comparison_threshold, true,
-//                                 false , Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
-//                                              centrality_list[iCent][0],centrality_list[iCent][1],
-//                                              centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      //new, with pt, upshift
-      double ks_n = KS_statistic_new(data_pt[iCent], pp_reference, -dpt*ipt, minpt_comparison_threshold-dpt*ipt, INT_MAX,
-                                     false, Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
-                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
-                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      //new, with pt, downshift
-//      double ks_n = KS_statistic_new(pp_reference, data_pt[iCent], dpt*ipt, minpt_comparison_threshold, INT_MAX,
-//                                 (ipt < 20 || ipt%20 == 0), Form("../tmp/tmpplot/cent_%i-%i%%/norebin/ks_n_Cent%i-%i%%_i%i",
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1],
-//                                                                 centrality_list[iCent][0],centrality_list[iCent][1], ipt), ipt);
-      ks_n_hist->SetBinContent(ipt, ks_n);
-      if (ks_n < cmin_ks_n) {
-        cmin_ks_n = ks_n;
-        cmin_dpt[2] = -dpt*ipt;
-        opt_pt_hist[2] = static_cast<TH1F*>(placeholder_hist->Clone());
-        opt_raa_hist[2] = static_cast<TH1F*>(placeholder_ratio->Clone());
+      // Compute the R_AA against the baseline spectrum
+      ratio_shifting[i_cent]->Reset();
+      for (int i_bin = 1; i_bin <= hist_shifting[i_cent]->GetXaxis()->GetNbins(); ++i_bin) {
+        if (hist_baseline[i_cent]->GetBinContent(i_bin) == 0) continue;
+        ratio_shifting[i_cent]->SetBinContent(i_bin, hist_shifting[i_cent]->GetBinContent(i_bin) / hist_baseline[i_cent]->GetBinContent(i_bin));
       }
       
       
-    }// End pT loop
+      // Compare against data RAA using MSE fit metric
+      // Currently separated in case any error analysis from data stat/syst comes into play...
+      float MSE = 0;
+      for (int i_bin = 1; i_bin <= hist_shifting[i_cent]->GetXaxis()->GetNbins(); ++i_bin) {
+        if (ratio_shifting[i_cent]->GetBinContent(i_bin) == 0) continue;
+        if (hist_raa_datreference[i_cent]->GetBinContent(i_bin) == 0) continue;
+        
+        float residual = TMath::Log(hist_raa_datreference[i_cent]->GetBinContent(i_bin)
+                                    / ratio_shifting[i_cent]->GetBinContent(i_bin));
+        MSE += residual*residual;
+      }
+      
+      chi2_hist[i_cent]->Fill(i_delta*delta_pT, MSE);
+      if (MSE < fitmetric_best[i_cent]) {
+        fitmetric_best[i_cent] = MSE;
+        pT_shift_best[i_cent] = i_delta*delta_pT;
+      }
+    }// End of pT Shift loop
     
-    //--------------------------------------------------------------Plotting results
+    // Found best fit! Say some things about it...
     
-    TLine* thresholdLine = new TLine();
-    thresholdLine->SetLineColor(kGray+1);
-    thresholdLine->SetLineStyle(9);
+    std::cout << "best fit delta_pT = " << pT_shift_best[i_cent] << ", found with MSE = " << fitmetric_best[i_cent] << std::endl;
     
-    TLine* optLine = new TLine();
-    optLine->SetLineColor(kOrange+7);
-    optLine->SetLineStyle(3);
-    
-    canvas->cd();
-    TLatex* tex_title = drawText(Form("Energyloss Fitting Summary for %s #bf{%s}, #sqrt{s} = %.2fTeV",
-                                      experiment, species, sqrt_s), 0.02, 0.95);
-    TLatex* tex_subtitle;
-    tex_subtitle = drawText(Form("Centrality bin %i-%i%%, data_errors_sumbyquadrature = %s",
-                                 centrality_list[iCent][0], centrality_list[iCent][1], string_truefalse[!data_errors_sumbyquadrature]),
-                            0.02, 0.91, false, kBlack, 0.03);
-    drawText("#chi^{2} Fitting", 0.065, 0.7, false, kBlack, 0.03)->SetTextAngle(90);
-    drawText("KS Fit, Hist Rebin", 0.065, 0.35, false, kBlack, 0.03)->SetTextAngle(90);
-    drawText("KS Fit, No Rebin", 0.065, 0.05, false, kBlack, 0.03)->SetTextAngle(90);
-    
-    mainpad->cd(1);
-//    gPad->SetLogx();
+    // Draw fit metric over the parameter space...
     gPad->SetLogy();
-    pp_reference->Draw("hist");
-    TH1F* datCompPlot[3];
-    datCompPlot[0] = static_cast<TH1F*>(data_pt[iCent]->Clone());
-    datCompPlot[0]->SetLineColor(kViolet+5);
-    datCompPlot[0]->Draw("hist same");
-    datCompPlot[0]->Scale(definiteIntegral(opt_pt_hist[0], minpt_comparison_threshold)/
-                          definiteIntegral(datCompPlot[0], minpt_comparison_threshold));
-    opt_pt_hist[0]->SetLineColor(kRed+2);
-    opt_pt_hist[0]->Draw("hist same");
-    thresholdLine->DrawLine(minpt_comparison_threshold, 0, minpt_comparison_threshold,
-                            pp_reference->GetMaximum()*1.1);
-    TLegend *baseLeg_top = new TLegend(0.5, 0.68, 0.88, 0.89);
-    baseLeg_top->SetLineWidth(0);
-    baseLeg_top->AddEntry(pp_reference, "#bf{pp} Reference p_{T} Spectrum ", "l");
-    baseLeg_top->AddEntry(datCompPlot[0], Form("Rescaled #bf{%s} p_{T} Data", species), "l");
-    baseLeg_top->AddEntry(opt_pt_hist[0], Form("Fit Result #Deltap_{T} = %.2f", cmin_dpt[0]), "l");
-    baseLeg_top->AddEntry(thresholdLine, "p_{T} Comparison Threshold", "l");
-    baseLeg_top->Draw();
+    chi2_hist[i_cent]->Draw("hist");
+    canvas_check->SaveAs(Form("%s/delta_pT_fitmetric_cent%s.pdf",outplot_directory,raa_centbin[i_cent]));
     
-    mainpad->cd(2);
-    if (dpt < 0.05) chi2_hist->Draw("hist l");
-    else            chi2_hist->Draw("hist");
-    optLine->DrawLine(cmin_dpt[0], 0, cmin_dpt[0], chi2_hist->GetMaximum()*1.05);
-    if (cmin_dpt[0] > max_dpt/2) drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[0]), cmin_dpt[0]-0.1,
-                                          chi2_hist->GetMaximum()*0.95, true, kBlack, 0.04, 42, false);
-    else                         drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[0]), cmin_dpt[0]+0.1,
-                                          chi2_hist->GetMaximum()*0.95, false, kBlack, 0.04, 42, false);
+    // Reproduce the best fit...
     
-    mainpad->cd(3);
-    //  gPad->SetLogx();
-      gPad->SetLogy();
-    data_raa[iCent]->SetLineColor(kBlack);
-    data_raa[iCent]->Draw("hist");
-    data_raa[iCent]->GetYaxis()->SetRangeUser(0.05, 1);
-    opt_raa_hist[0]->SetLineColor(kRed+2);
-    opt_raa_hist[0]->Draw("hist same");
-    thresholdLine->DrawLine(minpt_comparison_threshold, data_raa[iCent]->GetMinimum(),
-                            minpt_comparison_threshold, data_raa[iCent]->GetMaximum()*1.05);
-    TLegend *baseLeg_low = new TLegend(0.4, 0.15, 0.88, 0.35);
-    baseLeg_low->SetLineWidth(0);
-    baseLeg_low->SetFillColorAlpha(kWhite, 0.85);
-    baseLeg_low->AddEntry(data_raa[iCent], Form("#bf{%s} R_{AA} Data", species), "l");
-    baseLeg_low->AddEntry(opt_raa_hist[0], Form("Ratio #frac{#bf{pp} Reference}{Fit Result #Deltap_{T} = %.2f}", cmin_dpt[0]), "l");
-    baseLeg_low->Draw();
+    // Perform the shift using unbinned jet data
+    hist_shifting[i_cent]->Reset();
+    for (int i_jet = 0; i_jet < ntotal_jets; ++i_jet)
+      hist_shifting[i_cent]->Fill(pT_unbinned.at(i_jet) - pT_shift_best[i_cent], weight_unbinned.at(i_jet));
+    hist_shifting[i_cent]->Scale(1, "width");
     
-    mainpad->cd(4);
-    // Construct double ratio
-    TAxis* refaxis = pp_reference->GetXaxis();
-    int nbins_doubleratio = refaxis->GetNbins() - refaxis->FindBin(minpt_comparison_threshold+cmin_dpt[0])+1;
-    double binedge_ratio_1[nbins_doubleratio+1];
-    for (int irbin = 0; irbin <= nbins_doubleratio; ++irbin)
-      binedge_ratio_1[irbin] = refaxis->GetBinLowEdge(refaxis->GetNbins() - nbins_doubleratio + irbin + 1);
-    TH1D* doubleratio = new TH1D("",";p_{T};Double Ratio (Data / Shifted)",nbins_doubleratio, binedge_ratio_1);
-    double raa, praa;
-    for (int irbin = 1; irbin <= nbins_doubleratio; ++irbin) {
-      raa =  data_raa[iCent]->GetBinContent(data_raa[iCent]->FindBin(doubleratio->GetBinCenter(irbin)));
-      praa = opt_raa_hist[0]->GetBinContent(opt_raa_hist[0]->FindBin(doubleratio->GetBinCenter(irbin)));
-      std::cout << "bin " << doubleratio->GetBinCenter(irbin) << ", \tRAA = " << raa << ", \tpRAA = " << praa << std::endl;
-      if (raa == 0 || praa == 0) continue;
-      doubleratio->SetBinContent(irbin, raa/praa);
-    }setStyleLine(doubleratio, "violet thin");
-    doubleratio->Draw("hist");
-    drawUnityLine(doubleratio->GetXaxis());
+    // Compute the R_AA against the baseline spectrum
+    ratio_shifting[i_cent]->Reset();
+    for (int i_bin = 1; i_bin <= hist_shifting[i_cent]->GetXaxis()->GetNbins(); ++i_bin) {
+      if (hist_baseline[i_cent]->GetBinContent(i_bin) == 0) continue;
+      ratio_shifting[i_cent]->SetBinContent(i_bin, hist_shifting[i_cent]->GetBinContent(i_bin) / hist_baseline[i_cent]->GetBinContent(i_bin));
+    }
     
-    mainpad->cd(5);
-    gPad->SetLogy();
-    pp_reference->Draw("hist");
-    datCompPlot[1] = static_cast<TH1F*>(data_pt[iCent]->Clone());
-    datCompPlot[1]->SetLineColor(kViolet+5);
-    datCompPlot[1]->Draw("hist same");
-    datCompPlot[1]->Scale(definiteIntegral(opt_pt_hist[1], minpt_comparison_threshold)/
-                          definiteIntegral(datCompPlot[1], minpt_comparison_threshold));
-    datCompPlot[1]->Draw("hist same");
-    opt_pt_hist[1]->SetLineColor(kRed+2);
-    opt_pt_hist[1]->Draw("hist same");
-    thresholdLine->DrawLine(minpt_comparison_threshold, 0, minpt_comparison_threshold,
-                            pp_reference->GetMaximum()*1.1);
-    baseLeg_top = new TLegend(0.5, 0.68, 0.88, 0.89);
-    baseLeg_top->SetLineWidth(0);
-    baseLeg_top->AddEntry(pp_reference, "#bf{pp} Reference p_{T} Spectrum ", "l");
-    baseLeg_top->AddEntry(datCompPlot[1], Form("Rescaled #bf{%s} p_{T} Data", species), "l");
-    baseLeg_top->AddEntry(opt_pt_hist[1], Form("Fit Result #Deltap_{T} = %.2f", cmin_dpt[1]), "l");
-    baseLeg_top->AddEntry(thresholdLine, "p_{T} Comparison Threshold", "l");
-    baseLeg_top->Draw();
-//    TMultiGraph* bothCDF_rebin = new TMultiGraph();
-//    TGraph* cdf_ref = drawCDF(data_raa[iCent], 0, true);
-//    TGraph* cdf_rebin = drawCDF(opt_raa_hist[1], 0, true);
-//    cdf_ref->SetLineColor(kBlack);
-//    cdf_rebin->SetLineColor(kRed+2);
-//    bothCDF_rebin->Add(cdf_ref);
-//    bothCDF_rebin->Add(cdf_rebin);
-//    bothCDF_rebin->Draw("al");
+    gPad->SetLogy(0);
+    hist_raa_datreference[i_cent]->GetYaxis()->SetRangeUser(0, 0.8);
+    hist_raa_datreference[i_cent]->Draw("hist");
+    ratio_shifting[i_cent]->SetLineColor(kViolet);
+    ratio_shifting[i_cent]->Draw("hist same");
+    canvas_check->SaveAs(Form("%s/delta_pT_fitresult_cent%s.pdf",outplot_directory, raa_centbin[i_cent]));
     
-    mainpad->cd(6);
-    if (dpt < 0.05) ks_r_hist->Draw("hist l");
-    else            ks_r_hist->Draw("hist");
-    optLine->DrawLine(cmin_dpt[1], 0, cmin_dpt[1], ks_r_hist->GetMaximum()*1.05);
-    if (cmin_dpt[1] > max_dpt/2) drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[1]), cmin_dpt[1]-0.1,
-                                          ks_r_hist->GetMaximum()*0.95, true, kBlack, 0.04, 42, false);
-    else                         drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[1]), cmin_dpt[1]+0.1,
-                                          ks_r_hist->GetMaximum()*0.95, false, kBlack, 0.04, 42, false);
-    
-    mainpad->cd(7);
-    gPad->SetLogy();
-    data_raa[iCent]->Draw("hist");
-    opt_raa_hist[1]->SetLineColor(kRed+2);
-    opt_raa_hist[1]->Draw("hist same");
-    thresholdLine->DrawLine(minpt_comparison_threshold, data_raa[iCent]->GetMinimum(),
-                            minpt_comparison_threshold, data_raa[iCent]->GetMaximum()*1.05);
-    baseLeg_low = new TLegend(0.4, 0.15, 0.88, 0.35);
-    baseLeg_low->SetLineWidth(0);
-    baseLeg_low->SetFillColorAlpha(kWhite, 0.85);
-    baseLeg_low->AddEntry(data_raa[iCent], Form("#bf{%s} R_{AA} Data", species), "l");
-    baseLeg_low->AddEntry(opt_raa_hist[1], Form("Ratio #frac{#bf{pp} Reference}{Fit Result #Deltap_{T} = %.2f}", cmin_dpt[1]), "l");
-    baseLeg_low->Draw();
-    
-    mainpad->cd(8);
-    nbins_doubleratio = refaxis->GetNbins() - refaxis->FindBin(minpt_comparison_threshold+cmin_dpt[1])+1;
-    double binedge_ratio_2[nbins_doubleratio+1];
-    for (int irbin = 0; irbin <= nbins_doubleratio; ++irbin)
-      binedge_ratio_2[irbin] = refaxis->GetBinLowEdge(refaxis->GetNbins() - nbins_doubleratio + irbin + 1);
-    doubleratio = new TH1D("",";p_{T};Double Ratio (Data / Shifted)",nbins_doubleratio, binedge_ratio_2);
-    for (int irbin = 1; irbin <= nbins_doubleratio; ++irbin) {
-      raa =  data_raa[iCent]->GetBinContent(data_raa[iCent]->FindBin(doubleratio->GetBinCenter(irbin)));
-      praa = opt_raa_hist[1]->GetBinContent(opt_raa_hist[1]->FindBin(doubleratio->GetBinCenter(irbin)));
-      std::cout << "bin " << doubleratio->GetBinCenter(irbin) << ", \tRAA = " << raa << ", \tpRAA = " << praa << std::endl;
-      if (raa == 0 || praa == 0) continue;
-      doubleratio->SetBinContent(irbin, raa/praa);
-    }setStyleLine(doubleratio, "violet thin");
-    doubleratio->GetYaxis()->SetRangeUser(0, 2.1);
-    doubleratio->Draw("hist");
-    drawUnityLine(doubleratio->GetXaxis());
-    
-    mainpad->cd(9);
-    gPad->SetLogy();
-    pp_reference->Draw("hist");
-    datCompPlot[2] = static_cast<TH1F*>(data_pt[iCent]->Clone());
-    datCompPlot[2]->SetLineColor(kViolet+5);
-    datCompPlot[2]->Draw("hist same");
-    datCompPlot[2]->Scale(definiteIntegral(opt_pt_hist[2], minpt_comparison_threshold)/
-                          definiteIntegral(datCompPlot[2], minpt_comparison_threshold));
-    datCompPlot[2]->Draw("hist same");
-    opt_pt_hist[2]->SetLineColor(kRed+2);
-    opt_pt_hist[2]->Draw("hist same");
-    thresholdLine->DrawLine(minpt_comparison_threshold, 0, minpt_comparison_threshold,
-                            pp_reference->GetMaximum()*1.1);
-    baseLeg_top = new TLegend(0.5, 0.68, 0.88, 0.89);
-    baseLeg_top->SetLineWidth(0);
-    baseLeg_top->AddEntry(pp_reference, "#bf{pp} Reference p_{T} Spectrum ", "l");
-    baseLeg_top->AddEntry(datCompPlot[2], Form("Rescaled #bf{%s} p_{T} Data", species), "l");
-    baseLeg_top->AddEntry(opt_pt_hist[2], Form("Fit Result #Deltap_{T} = %.2f", cmin_dpt[2]), "l");
-    baseLeg_top->AddEntry(thresholdLine, "p_{T} Comparison Threshold", "l");
-    baseLeg_top->Draw();
-//    TMultiGraph* bothCDF_norebin = new TMultiGraph();
-//    TGraph* cdf_ref_pT = drawCDF(data_pt[iCent], 0, true);
-//    TGraph* cdf_rebin_pT = drawCDF(pp_reference, cmin_dpt[2], true);
-//    cdf_ref_pT->SetLineColor(kBlack);
-//    cdf_rebin_pT->SetLineColor(kRed+2);
-//    bothCDF_norebin->Add(cdf_ref);
-//    bothCDF_norebin->Add(cdf_rebin);
-//    bothCDF_norebin->Draw("al");
-    
-    mainpad->cd(10);
-    if (dpt < 0.05) ks_n_hist->Draw("hist l");
-    else            ks_n_hist->Draw("hist");
-    optLine->DrawLine(cmin_dpt[2], 0, cmin_dpt[2], ks_n_hist->GetMaximum()*1.05);
-    if (cmin_dpt[2] > max_dpt/2) drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[2]), cmin_dpt[2]-0.1,
-                                          ks_n_hist->GetMaximum()*0.95, true, kBlack, 0.04, 42, false);
-    else                         drawText(Form("#Deltap_{T} = %.2f", cmin_dpt[2]), cmin_dpt[2]+0.1,
-                                          ks_n_hist->GetMaximum()*0.95, false, kBlack, 0.04, 42, false);
-    
-    mainpad->cd(11);
-    gPad->SetLogy();
-    data_raa[iCent]->Draw("hist");
-    opt_raa_hist[2]->SetLineColor(kRed+2);
-    opt_raa_hist[2]->Draw("hist same");
-    thresholdLine->DrawLine(minpt_comparison_threshold, data_raa[iCent]->GetMinimum(),
-                            minpt_comparison_threshold, data_raa[iCent]->GetMaximum()*1.05);
-    baseLeg_low = new TLegend(0.4, 0.15, 0.88, 0.35);
-    baseLeg_low->SetLineWidth(0);
-    baseLeg_low->SetFillColorAlpha(kWhite, 0.85);
-    baseLeg_low->AddEntry(data_raa[iCent], Form("#bf{%s} R_{AA} Data", species), "l");
-    baseLeg_low->AddEntry(opt_raa_hist[2], Form("Ratio #frac{#bf{pp} Reference}{Fit Result #Deltap_{T} = %.2f}", cmin_dpt[2]), "l");
-    baseLeg_low->Draw();
-    
-    mainpad->cd(12);
-    nbins_doubleratio = refaxis->GetNbins() - refaxis->FindBin(minpt_comparison_threshold+cmin_dpt[2])+1;
-    double binedge_ratio_3[nbins_doubleratio+1];
-    for (int irbin = 0; irbin <= nbins_doubleratio; ++irbin)
-      binedge_ratio_3[irbin] = refaxis->GetBinLowEdge(refaxis->GetNbins() - nbins_doubleratio + irbin + 1);
-    doubleratio = new TH1D("",";p_{T};Double Ratio (Data / Shifted)",nbins_doubleratio, binedge_ratio_3);
-    for (int irbin = 1; irbin <= nbins_doubleratio; ++irbin) {
-      raa =  data_raa[iCent]->GetBinContent(data_raa[iCent]->FindBin(doubleratio->GetBinCenter(irbin)));
-      praa = opt_raa_hist[2]->GetBinContent(opt_raa_hist[2]->FindBin(doubleratio->GetBinCenter(irbin)));
-      std::cout << "bin " << doubleratio->GetBinCenter(irbin) << ", \tRAA = " << raa << ", \tpRAA = " << praa << std::endl;
-      if (raa == 0 || praa == 0) continue;
-      doubleratio->SetBinContent(irbin, raa/praa);
-    }setStyleLine(doubleratio, "violet thin");
-    doubleratio->GetYaxis()->SetRangeUser(0, 2.1);
-    doubleratio->Draw("hist");
-    drawUnityLine(doubleratio->GetXaxis());
-    
-    //--------------------------------------------------------------Export canvas, write data to tree
-    
-    canvas->SaveAs(Form("../plots/%s_%.2fTeV/%s/fitting/dptFit_cent%i-%i%%.pdf",
-                        species, sqrt_s, experiment, centrality_list[iCent][0], centrality_list[iCent][1]));
-    tex_title->Clear();
-    tex_subtitle->Clear();
-    
-    energyloss = cmin_dpt[0];
-    botcentbin_local = centrality_list[iCent][0];
-    topcentbin_local = centrality_list[iCent][1];
-    energyloss_tree->Fill();
-  }energyloss_tree->Write("energyloss_tree", TObject::kOverwrite);
+  }// End of centbin loop
+  
+  
+  
   return;
 }

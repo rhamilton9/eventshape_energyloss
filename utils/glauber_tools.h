@@ -11,21 +11,25 @@ double getNucleonCrossSection(double sqrts_local) {
   if (sqrts_local == 0.20) return 41.6;
   if (sqrts_local == 2.76) return 61.8;
   if (sqrts_local == 5.02) return 67.6;
-  return 29.8 + 0.038 * TMath::Power(TMath::Log(sqrts_local), 2.43);
+  if (sqrts_local == 5.44) return 68.4;
+  return 29.8 + 0.038 * TMath::Power(2*TMath::Log(sqrts_local*1e3), 2.43);
 }
 
-int nucleusLookup(const char* species) {
+int nucleusLookup(char* species) {
   TString species_t = species;
   // Test for most common types first
   if      (species_t == "Au")   return 197;
+  else if      (species_t == "Au2rw")   return 197;
   else if (species_t == "Pb")   return 208;
   else if (species_t == "p")    return 1001;
   else if (species_t == "d")    return 1002;
   else if (species_t == "O")    return 16;
   else if (species_t == "Xe")   return 129;
+  else if (species_t == "Xe2arw")   return 129;
   else if (species_t == "Ar")   return 18040;
   else if (species_t == "Ca")   return 20040;
   else if (species_t == "Cu")   return 63;
+  else if (species_t == "Cu2rw")   return 63;
   else if (species_t == "U")    return 238;
   else if (species_t == "Ni")   return 58;
   else if (species_t == "t")    return 1003;
@@ -42,7 +46,7 @@ int nucleusLookup(const char* species) {
 }
 
 // Return the total number of nucleons for a given collision system.
-int getMaxNucleons(const char* speciesA, const char* speciesB) {
+int getMaxNucleons(char* speciesA, char* speciesB) {
   return nucleusLookup(speciesA) % 1000 + nucleusLookup(speciesB) % 1000;
 }
 
@@ -160,8 +164,17 @@ double getImpactParameterFromCentralityClass(int centrality, double sqrts_local,
       9.53, 9.99, 10.4, 10.9, 11.3,
       11.7, 12.1, 12.5, 13.1, 13.8, 20.0 };
     for (int i = 0; i < 21; ++i) centralityData[i] = tempArray[i];
-  } else if (speciesA_t == "Au" && speciesB_t == "Au"
-             && (TMath::Abs(sqrts_local - 0.2) <= 0.01)) {
+  } else if (speciesA_t == "Xe2arw" && speciesB_t == "Xe2arw"
+             && (TMath::Abs(sqrts_local - 5.44) <= 0.05)) {
+    lookupFlag = true;
+    double tempArray[21] = {
+      0.00, 3.01, 4.26, 5.22, 6.02,
+      6.73, 7.38, 7.97, 8.52, 9.04,
+      9.53, 9.99, 10.4, 10.9, 11.3,
+      11.7, 12.1, 12.5, 13.1, 13.8, 20.0 };
+    for (int i = 0; i < 21; ++i) centralityData[i] = tempArray[i];
+  }else if (speciesA_t == "Au" && speciesB_t == "Au"
+            && (TMath::Abs(sqrts_local - 0.2) <= 0.01)) {
     lookupFlag = true;
     double tempArray[21] = {
       0.00, 3.31, 4.68, 5.73, 6.61,
@@ -169,8 +182,28 @@ double getImpactParameterFromCentralityClass(int centrality, double sqrts_local,
       10.5, 11.0, 11.5, 11.9, 12.4,
       12.8, 13.2, 13.7, 14.2, 14.9, 20.0 };
     for (int i = 0; i < 21; ++i) centralityData[i] = tempArray[i];
-  } else if (speciesA_t == "Cu" && speciesB_t == "Cu"
-             && (TMath::Abs(sqrts_local - 0.2) <= 0.01)) {
+  }else if (speciesA_t == "Au2rw" && speciesB_t == "Au2rw"
+            && (TMath::Abs(sqrts_local - 0.2) <= 0.01)) {
+    lookupFlag = true;
+    double tempArray[21] = {
+      0.00, 3.31, 4.68, 5.73, 6.61,
+      7.39, 8.10, 8.75, 9.35, 9.92,
+      10.5, 11.0, 11.5, 11.9, 12.4,
+      12.8, 13.2, 13.7, 14.2, 14.9, 20.0 };
+    for (int i = 0; i < 21; ++i) centralityData[i] = tempArray[i];
+  }
+  else if (speciesA_t == "Cu" && speciesB_t == "Cu"
+           && (TMath::Abs(sqrts_local - 0.2) <= 0.01)) {
+    lookupFlag = true;
+    double tempArray[21] = {
+      0.00, 2.34, 3.31, 4.06, 4.68,
+      5.24, 5.73, 6.19, 6.62, 7.02,
+      7.40, 7.77, 8.11, 8.45, 8.78,
+      9.11, 9.47, 9.86, 10.3, 11.0, 19.1 };
+    for (int i = 0; i < 21; ++i) centralityData[i] = tempArray[i];
+  }
+  else if (speciesA_t == "Cu2rw" && speciesB_t == "Cu2rw"
+           && (TMath::Abs(sqrts_local - 0.2) <= 0.01)) {
     lookupFlag = true;
     double tempArray[21] = {
       0.00, 2.34, 3.31, 4.06, 4.68,
@@ -182,8 +215,8 @@ double getImpactParameterFromCentralityClass(int centrality, double sqrts_local,
   
   if (lookupFlag) return centralityData[centrality/5];
   std::cout << "Error in glauber_tools::getImpactParameterFromCentralityClass: " <<
-    "System " << speciesA << speciesB << " not found in lookup at sqrt{s} = " <<
-    sqrts_local << "." << std::endl;
+  "System " << speciesA << speciesB << " not found in lookup at sqrt{s} = " <<
+  sqrts_local << "." << std::endl;
   return 0;
 }
 
@@ -217,17 +250,17 @@ double getParticipantPlaneAngle(TH2D* edensity) {
       intWeightedXY += ceD*cx*cy;
     }
   }// end of integration loop
-
+  
   double avgX  = intWeightedX  / intUnweighted;
   double avgX2 = intWeightedX2 / intUnweighted;
   double avgY  = intWeightedY  / intUnweighted;
   double avgY2 = intWeightedY2 / intUnweighted;
   double avgXY = intWeightedXY / intUnweighted;
-
+  
   double sigmaX = avgX2 - TMath::Power(avgX, 2);
   double sigmaY = avgY2 - TMath::Power(avgY, 2);
   double sigmaXY = avgXY - avgX*avgY;
-
+  
   return 0.5*TMath::ATan2(sigmaY - sigmaX, 2*sigmaXY );
 }
 
@@ -247,4 +280,3 @@ TH2D* geometricEnergyDensity(TH2D* thicknessA, TH2D* thicknessB) {
     }
   }return edensity;
 }
-

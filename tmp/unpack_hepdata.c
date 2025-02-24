@@ -14,7 +14,7 @@
 
 void unpack_hepdata(const char* filename, std::vector<int> toKeep = {}) {
   TFile *fin = new TFile(filename, "read");
-  if (!fin) {
+  if (!fin || fin->IsZombie()) {
     std::cout << "File not found!" << std::endl;
     return;
   }

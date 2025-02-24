@@ -5,11 +5,6 @@
 #include "../utils/root_draw_tools.h"
 #include "../utils/hist_tools.h"
 
-// TODO:
-//    - Add labels to plots for various settings in the package.
-//    - Include settings for detector string in trees so that e.g.
-//      ALICE and ATLAS data can be simultaneously handled.
-
 void energyloss_eventshape() {
   char species[5];
   snprintf(species, 5, "%s%s", speciesA, speciesB);
